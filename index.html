@@ -2,42 +2,172 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Calculator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Ultimate Calculator</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#121212" />
 </head>
 <body>
-  <div class="calculator">
-    <input type="text" id="display" readonly />
-    <div class="buttons">
-      <button onclick="clearDisplay()">C</button>
-      <button onclick="append('/')">/</button>
-      <button onclick="append('*')">*</button>
-      <button onclick="append('-')">-</button>
+  <div class="container">
+    <h1>Ultimate Calculator</h1>
 
-      <button onclick="append('7')">7</button>
-      <button onclick="append('8')">8</button>
-      <button onclick="append('9')">9</button>
-      <button onclick="append('+')">+</button>
-
-      <button onclick="append('4')">4</button>
-      <button onclick="append('5')">5</button>
-      <button onclick="append('6')">6</button>
-      <button onclick="calculate()">=</button>
-
-      <button onclick="append('1')">1</button>
-      <button onclick="append('2')">2</button>
-      <button onclick="append('3')">3</button>
-      <button onclick="append('0')">0</button>
-      <button onclick="append('.')">.</button>
+    <!-- Mode Toggle -->
+    <div class="mode-toggle">
+      <label for="modeSelect">Choose Mode:</label>
+      <select id="modeSelect" onchange="switchMode()">
+        <option value="standard">Standard</option>
+        <option value="scientific">Scientific</option>
+        <option value="converter">Unit Converter</option>
+      </select>
     </div>
+
+    <!-- === Standard Calculator === -->
+    <div id="standard" class="calc-mode">
+      <input type="text" id="display" readonly />
+      <div class="buttons">
+        <button onclick="clearDisplay()">C</button>
+        <button onclick="backspace()">⌫</button>
+        <button onclick="append('%')">%</button>
+        <button onclick="append('/')">÷</button>
+        <button onclick="append('7')">7</button>
+        <button onclick="append('8')">8</button>
+        <button onclick="append('9')">9</button>
+        <button onclick="append('*')">×</button>
+        <button onclick="append('4')">4</button>
+        <button onclick="append('5')">5</button>
+        <button onclick="append('6')">6</button>
+        <button onclick="append('-')">−</button>
+        <button onclick="append('1')">1</button>
+        <button onclick="append('2')">2</button>
+        <button onclick="append('3')">3</button>
+        <button onclick="append('+')">+</button>
+        <button onclick="append('0')">0</button>
+        <button onclick="append('.')">.</button>
+        <button onclick="calculate()">=</button>
+      </div>
+    </div>
+
+    <!-- === Scientific Calculator === -->
+    <div id="scientific" class="calc-mode" style="display: none;">
+      <input type="text" id="displayScientific" readonly />
+
+      <!-- Angle Mode Toggle -->
+      <div class="angle-toggle">
+        <label><input type="radio" name="angle" value="DEG" checked onchange="setAngleMode(this.value)"> Degrees</label>
+        <label><input type="radio" name="angle" value="RAD" onchange="setAngleMode(this.value)"> Radians</label>
+      </div>
+
+      <!-- Memory Buttons -->
+      <div class="memory-buttons">
+        <button onclick="memoryClear()">MC</button>
+        <button onclick="memoryRecall()">MR</button>
+        <button onclick="memoryAdd()">M+</button>
+        <button onclick="memorySubtract()">M-</button>
+      </div>
+
+      <!-- Scientific Functions -->
+      <div class="scientific-buttons">
+        <button onclick="appendToScientific('Math.PI')">π</button>
+        <button onclick="appendToScientific('Math.E')">e</button>
+        <button onclick="appendToScientific('Math.sqrt(')">√</button>
+        <button onclick="appendToScientific('Math.pow(')">xʸ</button>
+        <button onclick="appendToScientific('Math.sin(')">sin</button>
+        <button onclick="appendToScientific('Math.cos(')">cos</button>
+        <button onclick="appendToScientific('Math.tan(')">tan</button>
+        <button onclick="appendToScientific('Math.log(')">ln</button>
+        <button onclick="appendToScientific('Math.log10(')">log₁₀</button>
+        <button onclick="appendToScientific('Math.exp(')">exp</button>
+        <button onclick="appendToScientific('Math.abs(')">abs</button>
+        <button onclick="appendToScientific('Math.floor(')">floor</button>
+        <button onclick="appendToScientific('Math.ceil(')">ceil</button>
+        <button onclick="appendToScientific('Math.pow(10,')">10^x</button>
+        <button onclick="appendToScientific('factorial(')">x!</button>
+        <button onclick="appendToScientific('(')">(</button>
+        <button onclick="appendToScientific(')')">)</button>
+      </div>
+
+      <!-- Combinatorics -->
+      <div class="scientific-buttons">
+        <button onclick="appendToScientific('nCr(')">nCr</button>
+        <button onclick="appendToScientific('nPr(')">nPr</button>
+      </div>
+
+      <!-- Statistics -->
+      <div class="scientific-buttons">
+        <button onclick="appendToScientific('mean([')">mean()</button>
+        <button onclick="appendToScientific('median([')">median()</button>
+        <button onclick="appendToScientific('stdDev([')">stdDev()</button>
+      </div>
+
+      <!-- Constants -->
+      <div class="scientific-buttons">
+        <button onclick="appendToScientific('6.67430e-11')">G</button>
+        <button onclick="appendToScientific('1.380649e-23')">k</button>
+        <button onclick="appendToScientific('8.314')">R</button>
+        <button onclick="appendToScientific('6.022e23')">Na</button>
+        <button onclick="appendToScientific('96485')">F</button>
+        <button onclick="appendToScientific('299792458')">c</button>
+        <button onclick="appendToScientific('1.496e11')">AU</button>
+        <button onclick="appendToScientific('9.461e15')">ly</button>
+      </div>
+
+      <!-- Numpad -->
+      <div class="scientific-numpad">
+        <button onclick="appendToScientific('7')">7</button>
+        <button onclick="appendToScientific('8')">8</button>
+        <button onclick="appendToScientific('9')">9</button>
+        <button onclick="appendToScientific('/')">÷</button>
+        <button onclick="appendToScientific('4')">4</button>
+        <button onclick="appendToScientific('5')">5</button>
+        <button onclick="appendToScientific('6')">6</button>
+        <button onclick="appendToScientific('*')">×</button>
+        <button onclick="appendToScientific('1')">1</button>
+        <button onclick="appendToScientific('2')">2</button>
+        <button onclick="appendToScientific('3')">3</button>
+        <button onclick="appendToScientific('-')">−</button>
+        <button onclick="appendToScientific('0')">0</button>
+        <button onclick="appendToScientific('.')">.</button>
+        <button onclick="calculateScientific()">=</button>
+        <button onclick="appendToScientific('+')">+</button>
+        <button onclick="clearScientific()">C</button>
+      </div>
+    </div>
+
+    <!-- === Unit Converter === -->
+    <div id="converter" class="calc-mode" style="display: none;">
+      <select id="convertType" onchange="updateConverterOptions()">
+        <option value="length">Length</option>
+        <option value="weight">Weight</option>
+        <option value="temperature">Temperature</option>
+      </select>
+      <input type="number" id="inputValue" placeholder="Enter value" />
+      <select id="fromUnit"></select>
+      <select id="toUnit"></select>
+      <button onclick="convertUnit()">Convert</button>
+      <p id="conversionResult"></p>
+    </div>
+
+    <!-- History -->
+    <h2>History</h2>
+    <div id="historyLog"></div>
+
+    <!-- Theme -->
+    <button onclick="toggleTheme()">Toggle Theme 🌙</button>
   </div>
+
   <script src="script.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('service-worker.js');
+    }
+
+    function switchMode() {
+      const mode = document.getElementById('modeSelect').value;
+      document.querySelectorAll('.calc-mode').forEach(div => {
+        div.style.display = 'none';
+      });
+      document.getElementById(mode).style.display = 'block';
     }
   </script>
 </body>
