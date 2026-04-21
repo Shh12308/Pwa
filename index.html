@@ -783,31 +783,31 @@ main{
 <div class="toast-ct" id="toastCt"></div>
 <script src="env.js"></script>
 <script>
-/* ========== ENV FALLBACK & ERROR HANDLING WRAPPER ========== */
+(function(){
+'use strict';
+
+/* ========== ENV FALLBACK & ERROR HANDLING WRAPPER (MOVED INSIDE) ========== */
 if (typeof window.__ENV__ === 'undefined') {
   window.__ENV__ = { SUPABASE_URL:'', SUPABASE_ANON_KEY:'', FREE_AI_URL:'', PREMIUM_AI_URL:'' };
   console.warn('%c[HeloXAi] env.js not found. Create it with: window.__ENV__ = { SUPABASE_URL, SUPABASE_ANON_KEY, FREE_AI_URL, PREMIUM_AI_URL }', 'color:#f59e0b;font-weight:bold');
 }
 
-// Centralized Error Handler
+// MOVED HANDLE ERROR INSIDE SO IT CAN SEE 'toast'
 function handleError(err, context = 'Operation', showToast = true) {
   console.error(`[HeloXAi] Error in ${context}:`, err);
   if (showToast) {
     let msg = 'An unexpected error occurred.';
     if (err && err.message) msg = err.message;
     else if (typeof err === 'string') msg = err;
-    toast(msg, 'err');
+    toast(msg, 'err'); // Now this works because we are in the same scope
   }
 }
 
 function getEnvVar(k) { 
-  try {
-    return (window.__ENV__ && window.__ENV__[k]) || ''; 
-  } catch(e) { return ''; }
+    try {
+        return (window.__ENV__ && window.__ENV__[k]) || ''; 
+    } catch(e) { return ''; }
 }
-
-(function(){
-'use strict';
 
 var SB_URL = getEnvVar('SUPABASE_URL'), SB_KEY = getEnvVar('SUPABASE_ANON_KEY');
 var sb = null;
@@ -897,6 +897,15 @@ var VID_KW=['generate video','create video','make video','render video'];
 function isImgQ(t){ var l=t.toLowerCase(); for(var i=0;i<IMG_KW.length;i++) if(l.indexOf(IMG_KW[i])!==-1) return true; return false; }
 function isVidQ(t){ var l=t.toLowerCase(); for(var i=0;i<VID_KW.length;i++) if(l.indexOf(VID_KW[i])!==-1) return true; return false; }
 
+function toast(msg,type){
+  var ic={ok:'fa-circle-check',err:'fa-circle-xmark',inf:'fa-circle-info',wrn:'fa-triangle-exclamation'};
+  var el=document.createElement('div');el.className='toast '+(type||'inf');
+  el.innerHTML='<i class="fa-solid '+(ic[type||'inf']||ic.inf)+'"></i> '+esc(msg);
+  var ct = $('toastCt');
+  if(ct) ct.appendChild(el);
+  setTimeout(function(){if(el.parentNode)el.remove()},3200);
+}
+// ... REST OF YOUR CODE HERE ...
 /* --- LOCAL STORAGE HELPERS --- */
 function saveActiveChat(id) {
     try {
