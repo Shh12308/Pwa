@@ -2,7 +2,7 @@
 
 window.__ENV__ = {
   // MUST MATCH YOUR RUNPOD PUBLIC URL EXACTLY
-  "FREE_AI_URL": "https://xrahe1hg5aanqr-8080.proxy.runpod.net",
+  "FREE_AI_URL": "https://yto88alk8mynck-8080.proxy.runpod.net",
   
   // Optional: If your frontend is on the same domain as backend, you can leave this empty.
   // But since you are on Vercel and Backend is RunPod, you likely need the full URL above.
