@@ -790,7 +790,7 @@ main{
 <script>
 /* ========== ENV FALLBACK & ERROR HANDLING WRAPPER ========== */
 if (typeof window.__ENV__ === 'undefined') {
-  window.__ENV__ = { SUPABASE_URL:'', SUPABASE_ANON_KEY:'', FREE_AI_URL:'', PREMIUM_AI_URL:'' };
+  window.__ENV__ = { SUPABASE_URL:'', SUPABASE_ANON_KEY:'', FREE_AI_URL:'https://heloxai2.onrender.com', PREMIUM_AI_URL:'' };
   console.warn('%c[HeloXAi] env.js not found. Create it with: window.__ENV__ = { SUPABASE_URL, SUPABASE_ANON_KEY, FREE_AI_URL, PREMIUM_AI_URL }', 'color:#f59e0b;font-weight:bold');
 }
 
