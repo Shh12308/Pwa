@@ -737,7 +737,7 @@ main{
    ENV FALLBACK & ERROR HANDLING
    ========================================= */
 if (typeof window.__ENV__ === 'undefined') {
-  window.__ENV__ = { SUPABASE_URL:'', SUPABASE_ANON_KEY:'', FREE_AI_URL:'', PREMIUM_AI_URL:'' };
+  window.__ENV__ = { SUPABASE_URL:'', SUPABASE_ANON_KEY:'', FREE_AI_URL:'https://heloxai2.onrender.com', PREMIUM_AI_URL:'' };
   console.warn('%c[HeloXAi] env.js not found. Running in Guest Mode.', 'color:#f59e0b;font-weight:bold');
 }
 
