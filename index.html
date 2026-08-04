@@ -941,7 +941,7 @@ pre:hover .code-copy-btn{opacity:1}
 .gen-img-card img.loaded{opacity:1!important}
 .gen-img-btn{width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.6);backdrop-filter:blur(8px);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;-webkit-appearance:none;appearance:none}
 .gen-img-btn:hover{background:rgba(0,0,0,.85);transform:scale(1.05)}
-</style>
+
 /* ===== IMAGE GEN (completes truncated section) ===== */
 .img-gen-loader-bg{position:absolute;inset:0;background:linear-gradient(110deg,var(--bg-tertiary) 8%,var(--bg-quaternary) 18%,var(--bg-tertiary) 33%);background-size:200% 100%;animation:imgShimmer 1.5s ease-in-out infinite;pointer-events:none}
 .gen-img-card{margin:16px 0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);position:relative}
@@ -5643,6 +5643,32 @@ async function streamChat(prompt, convId, opts) {
         if (!line.startsWith('data: ')) continue;
         var raw = line.slice(6).trim();
         if (raw === '[DONE]') continue;
+
+// Test 2: Image card creation
+try {
+  var c = document.createElement('div');
+  document.body.appendChild(c);
+  var handled = ImageStreamHandler.handleEvent(
+    {type:'image', data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=='},
+    c, null, 'test-conv', 'test prompt'
+  );
+  console.log('Image event handled:', handled);
+  var img = c.querySelector('img');
+  console.log('Img created:', !!img, 'Has src:', !!img && img.src.length > 50);
+  document.body.removeChild(c);
+} catch(e) { console.log('Card error:', e.message); }
+
+// Test 3: Buffer flush exists?
+var scripts = document.querySelectorAll('script');
+var found = false;
+for (var i = 0; i < scripts.length; i++) {
+  if (scripts[i].textContent.includes('_fb') && scripts[i].textContent.includes('startsWith')) {
+    found = true;
+    console.log('Buffer flush FOUND in script #' + i);
+    break;
+  }
+}
+if (!found) console.log('❌ Buffer flush MISSING — image will never display');
 
         var parsed;
         try { parsed = JSON.parse(raw); } catch(e) { continue; }
