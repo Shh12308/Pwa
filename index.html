@@ -25,6 +25,129 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+<script>
+/* ═══ DOMPurify: allow data:image URIs ═══ */
+if(typeof DOMPurify!=='undefined'){
+  DOMPurify.addHook('uponSanitizeAttribute',function(n,d){
+    if(d.attrName==='src'&&d.attrValue&&d.attrValue.startsWith('data:image/'))
+      n.setAttribute('data-keep-src',d.attrValue);
+  });
+  DOMPurify.addHook('afterSanitizeAttributes',function(n){
+    var k=n.getAttribute('data-keep-src');
+    if(k){n.setAttribute('src',k);n.removeAttribute('data-keep-src');}
+  });
+}
+
+/* ═══ Image Stream Handler ═══ */
+var ImageStreamHandler=(function(){
+  var S=new Map();
+  function $(p,c){if(!p||!c)return false;try{p.appendChild(c);return true}catch(e){return false}}
+  function X(o,n){if(!o||!o.parentNode||!n)return false;try{o.parentNode.replaceChild(n,o);return true}catch(e){try{o.parentNode.removeChild(o)}catch(e2){}return false}}
+  function loader(){
+    var e=document.createElement('div');e.className='img-gen-loader';
+    e.innerHTML='<div class="img-gen-loader-bg"></div><div style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:14px;pointer-events:none"><i class="fa-solid fa-wand-magic-sparkles" style="font-size:36px;color:var(--accent);opacity:.6;animation:spin 3s linear infinite"></i><span style="font-size:13px;color:var(--text-muted);font-weight:500">Generating image...</span><span style="font-size:11px;color:var(--text-muted);opacity:.5">This may take 10-30 seconds</span></div>';
+    return e;
+  }
+  function card(b64,prompt){
+    if(!b64)return null;
+    var w=document.createElement('div');w.className='gen-img-card';
+    w.style.cssText='margin:16px 0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);position:relative';
+    var id='gi-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
+    var img=document.createElement('img');img.id=id;
+    img.alt=(prompt||'Generated image').replace(/[<>&"']/g,'').slice(0,200);
+    img.style.cssText='width:100%;display:block;border-radius:var(--radius);cursor:zoom-in;opacity:0;transition:opacity .5s ease,transform .4s cubic-bezier(.4,0,.2,1)';
+    img._ps='data:image/png;base64,'+b64;
+    img.addEventListener('click',function(){ImageStreamHandler.fullscreenById(id)});
+    var bd=document.createElement('div');
+    bd.style.cssText='position:absolute;bottom:10px;right:10px;display:flex;gap:6px;z-index:3';
+    bd.appendChild(mkBtn('fa-download','Download',function(e){e.stopPropagation();ImageStreamHandler.downloadById(id)}));
+    bd.appendChild(mkBtn('fa-expand','Fullscreen',function(e){e.stopPropagation();ImageStreamHandler.fullscreenById(id)}));
+    w.appendChild(img);w.appendChild(bd);
+    w._init=function(){
+      if(img._ps&&!img.src){img.src=img._ps;delete img._ps;}
+      requestAnimationFrame(function(){requestAnimationFrame(function(){img.style.opacity='1';img.classList.add('loaded')})});
+    };
+    return w;
+  }
+  function mkBtn(icon,title,fn){
+    var b=document.createElement('button');b.title=title;b.setAttribute('aria-label',title);
+    b.className='gen-img-btn';b.innerHTML='<i class="fa-solid '+icon+'"></i>';
+    b.addEventListener('click',fn);
+    return b;
+  }
+  function errBubble(msg){
+    var e=document.createElement('div');
+    e.style.cssText='margin:12px 0;padding:14px 18px;background:var(--adm-err-bg);border:1px solid var(--adm-err-border);border-radius:var(--radius-sm);color:var(--adm-err-text);font-size:13px;display:flex;align-items:center;gap:10px';
+    var i=document.createElement('i');i.className='fa-solid fa-circle-exclamation';i.style.flexShrink='0';
+    var s=document.createElement('span');s.textContent=(msg||'Image generation failed').replace(/[<>&"']/g,'');
+    e.appendChild(i);e.appendChild(s);return e;
+  }
+  function handle(p,ct,el,cid,prompt){
+    if(!p||typeof p!=='object'||!p.type)return false;
+    var t=p.type;
+    if(t!=='status'&&t!=='image'&&t!=='image_result'&&t!=='error')return false;
+    if(t==='status'){
+      var m=(p.message||'').toLowerCase();
+      if(!m.includes('image')&&!m.includes('generat')&&!m.includes('drawing'))return false;
+      if(!ct)return true;
+      if(el)el.classList.remove('streaming-cursor');
+      var ex=S.get(cid);if(ex&&ex.l)try{ex.l.parentNode.removeChild(ex.l)}catch(e){}
+      var l=loader();$(ct,l);S.set(cid,{l:l,p:prompt||'',b:null});return true;
+    }
+    if(t==='image'||t==='image_result'){
+      var b=p.data||p.image||p.base64||null;if(!b)return true;
+      if(!ct){S.set(cid,{l:null,p:prompt||'',b:b});return true;}
+      var c=card(b,prompt||'');if(!c)return true;
+      var st=S.get(cid);var ok=false;
+      if(st&&st.l)ok=X(st.l,c);
+      if(!ok)$(ct,c);
+      if(c._init)c._init();
+      S.set(cid,{l:null,p:prompt||'',b:b});
+      if(el){el.classList.remove('streaming-cursor','msg-streaming');var s=el.querySelector('.ai-status');if(s)s.style.display='none';}
+      return true;
+    }
+    if(t==='error'){
+      if(!ct)return true;
+      var es=S.get(cid);var eok=false;
+      if(es&&es.l)eok=X(es.l,errBubble(p.message));
+      if(!eok)$(ct,errBubble(p.message));
+      if(el)el.classList.remove('streaming-cursor','msg-streaming');
+      S.delete(cid);return true;
+    }
+    return false;
+  }
+  function cleanup(cid){
+    var s=S.get(cid);
+    if(s&&s.l){var c=card(s.b,s.p);if(c){X(s.l,c);if(c._init)c._init();}else try{s.l.parentNode.removeChild(s.l)}catch(e){}}
+    S.delete(cid);
+  }
+  function getB64(cid){var s=S.get(cid);return s?s.b:null;}
+  function dl(id){
+    try{var i=document.getElementById(id);if(!i||!i.src||i.src===location.href)return;
+    var a=document.createElement('a');a.href=i.src;a.download='heloxai-'+Date.now()+'.png';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);}catch(e){}
+  }
+  function fs(id){
+    try{var i=document.getElementById(id);if(!i||!i.src||i.src===location.href)return;
+    var m=document.getElementById('img-modal');
+    if(!m){m=document.createElement('div');m.id='img-modal';
+    m.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.88);backdrop-filter:blur(14px);display:none;align-items:center;justify-content:center;padding:24px;cursor:zoom-out;opacity:0;transition:opacity .25s ease';
+    m.addEventListener('click',function(e){if(e.target===m)ImageStreamHandler.closeFullscreen()});document.body.appendChild(m);}
+    m.innerHTML='';var mi=document.createElement('img');mi.src=i.src;mi.alt='';
+    mi.style.cssText='max-width:95vw;max-height:92vh;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.5);object-fit:contain';
+    m.appendChild(mi);m.style.display='flex';requestAnimationFrame(function(){m.style.opacity='1'});
+    var h=function(e){if(e.key==='Escape'){ImageStreamHandler.closeFullscreen();document.removeEventListener('keydown',h)}};document.addEventListener('keydown',h);
+    }catch(e){}
+  }
+  function cfs(){var m=document.getElementById('img-modal');if(m){m.style.opacity='0';setTimeout(function(){m.style.display='none'},250)}}
+  function histHTML(b64,prompt){
+    if(!b64)return'';var id='hi-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
+    var a=(prompt||'Generated image').replace(/[<>&"']/g,'').slice(0,200);
+    return'<div class="gen-img-card" style="margin:16px 0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);position:relative"><img id="'+id+'" src="data:image/png;base64,'+b64+'" alt="'+a+'" style="width:100%;display:block;border-radius:var(--radius);cursor:zoom-in;opacity:1" onclick="ImageStreamHandler.fullscreenById(\''+id+'\')"/><div style="position:absolute;bottom:10px;right:10px;display:flex;gap:6px;z-index:3"><button onclick="event.stopPropagation();ImageStreamHandler.downloadById(\''+id+'\')" class="gen-img-btn" title="Download"><i class="fa-solid fa-download"></i></button><button onclick="event.stopPropagation();ImageStreamHandler.fullscreenById(\''+id+'\')" class="gen-img-btn" title="Fullscreen"><i class="fa-solid fa-expand"></i></button></div></div>';
+  }
+  return{handleEvent:handle,cleanup:cleanup,getBase64:getB64,downloadById:dl,fullscreenById:fs,closeFullscreen:cfs,buildHistoryHTML:histHTML,createLoader:loader};
+})();
+</script>
 <!-- Mermaid for Diagrams -->
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
 
@@ -799,11 +922,46 @@ pre:hover .code-copy-btn{opacity:1}
   text-decoration: none;
   line-height: 1;
 }
-.cite-badge:hover {
-  background: var(--accent);
-  color: #fff;
-  transform: scale(1.1);
-}
+.cite-badge:hover{background:var(--accent);color:#fff;transform:scale(1.1)}
+
+.cite-badge:hover{background:var(--accent);color:#fff;transform:scale(1.1)}
+.search-group{margin:18px 0;padding:14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-secondary)}
+.search-group-title{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.search-group-title i{color:var(--accent);font-size:13px}
+.search-qa-item{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s}
+.search-qa-item:last-child{border-bottom:none}
+.search-qa-item:hover{background:var(--bg-hover)}
+.search-qa-q{font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:10px}
+.search-qa-q i{color:var(--accent);font-size:12px;flex-shrink:0}
+.search-qa-a{font-size:13px;color:var(--text-secondary);line-height:1.6;margin-top:6px;padding-left:22px;display:none}
+.search-qa-item.open .search-qa-a{display:block}
+.img-gen-loader-bg{position:absolute;inset:0;background:linear-gradient(110deg,var(--bg-tertiary) 8%,var(--bg-quaternary) 18%,var(--bg-tertiary) 33%);background-size:200% 100%;animation:imgShimmer 1.5s ease-in-out infinite;pointer-events:none}
+.gen-img-card{margin:16px 0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);position:relative}
+.gen-img-card img{width:100%;display:block;border-radius:var(--radius);cursor:zoom-in}
+.gen-img-card img.loaded{opacity:1!important}
+.gen-img-btn{width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.6);backdrop-filter:blur(8px);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;-webkit-appearance:none;appearance:none}
+.gen-img-btn:hover{background:rgba(0,0,0,.85);transform:scale(1.05)}
+</style>
+/* ===== IMAGE GEN (completes truncated section) ===== */
+.img-gen-loader-bg{position:absolute;inset:0;background:linear-gradient(110deg,var(--bg-tertiary) 8%,var(--bg-quaternary) 18%,var(--bg-tertiary) 33%);background-size:200% 100%;animation:imgShimmer 1.5s ease-in-out infinite;pointer-events:none}
+.gen-img-card{margin:16px 0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);position:relative}
+.gen-img-card img{width:100%;display:block;border-radius:var(--radius);cursor:zoom-in}
+.gen-img-card img.loaded{opacity:1!important}
+.gen-img-btn{width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.6);backdrop-filter:blur(8px);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;-webkit-appearance:none;appearance:none}
+.gen-img-btn:hover{background:rgba(0,0,0,.85);transform:scale(1.05)}
+
+/* Search result group container */
+.search-group{margin:18px 0;padding:14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-secondary)}
+.search-group-title{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.search-group-title i{color:var(--accent);font-size:13px}
+.search-qa-item{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s}
+.search-qa-item:last-child{border-bottom:none}
+.search-qa-item:hover{background:var(--bg-hover)}
+.search-qa-q{font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:10px}
+.search-qa-q i{color:var(--accent);font-size:12px;flex-shrink:0}
+.search-qa-a{font-size:13px;color:var(--text-secondary);line-height:1.6;margin-top:6px;padding-left:22px;display:none}
+.search-qa-item.open .search-qa-a{display:block}
+
 
 /* Search result group container */
 .search-group {
@@ -5464,14 +5622,13 @@ async function streamChat(prompt, convId, opts) {
       throw new Error('HTTP ' + resp.status + (errText ? ': ' + errText.slice(0, 200) : ''));
     }
 
-    var reader = resp.body.getReader();
+        var reader = resp.body.getReader();
     var decoder = new TextDecoder();
     var buffer = '';
-    var effectiveConvId = convId; // may be updated by backend
+    var effectiveConvId = convId;
 
     while (true) {
       if (streamAborted) break;
-
       var result = await reader.read();
       if (result.done) break;
 
@@ -5481,7 +5638,8 @@ async function streamChat(prompt, convId, opts) {
 
       for (var i = 0; i < lines.length; i++) {
         if (streamAborted) break;
-        var line = lines[i];
+        var line = lines[i].replace(/\r$/, '');
+        if (!line) continue;
         if (!line.startsWith('data: ')) continue;
         var raw = line.slice(6).trim();
         if (raw === '[DONE]') continue;
@@ -5489,11 +5647,76 @@ async function streamChat(prompt, convId, opts) {
         var parsed;
         try { parsed = JSON.parse(raw); } catch(e) { continue; }
 
-        // ── Update conversation ID if backend sends one ──
         if (parsed.conversation_id && !effectiveConvId) {
           effectiveConvId = parsed.conversation_id;
         }
 
+        // Image events — bypass DOMPurify/marked
+        if (ImageStreamHandler.handleEvent(parsed, msgCt, msgEl, effectiveConvId || '__none__', prompt)) {
+          isImageGen = true;
+          if (stopBtn && stopBtn.parentNode) stopBtn.remove();
+          continue;
+        }
+
+        // Text content
+        if (parsed.type === 'content' && typeof parsed.text === 'string') {
+          fullText += parsed.text;
+          try {
+            var rawHtml = typeof marked !== 'undefined'
+              ? marked.parse(fullText, { breaks: true, gfm: true })
+              : fullText.replace(/</g, '&lt;').replace(/\n/g, '<br>');
+            var cleanHtml = typeof DOMPurify !== 'undefined'
+              ? DOMPurify.sanitize(rawHtml, {
+                  ALLOWED_TAGS: DOMPurify.getDefaultConfig().ALLOWED_TAGS,
+                  ALLOWED_ATTR: ['src','alt','id','class','style','href','target','rel','data-keep-src','onclick','loading'],
+                  ADD_TAGS: ['img','details','summary','input'],
+                  ADD_ATTR: ['type','checked','disabled','open']
+                })
+              : rawHtml;
+            msgCt.innerHTML = cleanHtml;
+          } catch(e) { msgCt.textContent = fullText; }
+
+          msgEl.classList.add('streaming-cursor');
+          if (wrap) requestAnimationFrame(function() { wrap.scrollTop = wrap.scrollHeight; });
+          continue;
+        }
+
+        if (parsed.type === 'done') {
+          msgEl.classList.remove('streaming-cursor', 'msg-streaming');
+          if (msgLabel) { var st = msgLabel.querySelector('.ai-status'); if (st) st.style.display = 'none'; }
+          continue;
+        }
+
+        if (parsed.type === 'error') {
+          msgEl.classList.remove('streaming-cursor', 'msg-streaming');
+          if (!isImageGen) {
+            msgCt.innerHTML = '<div style="color:var(--danger);padding:8px 0"><i class="fa-solid fa-circle-exclamation"></i> ' +
+              ((parsed.message || 'Error') + '').replace(/[<>&"']/g, '') + '</div>';
+          }
+          continue;
+        }
+      }
+    }
+
+    /* FLUSH: image base64 (~1.2MB) arrives as one SSE line that spans
+       hundreds of TCP chunks. The \n only appears at the very end,
+       so it stays in buffer until the stream closes. Without this
+       flush, the image event is never processed. */
+    var _fb = buffer.replace(/\r$/, '');
+    if (_fb && _fb.startsWith('data: ')) {
+      var _fp = _fb.slice(6).trim();
+      if (_fp !== '[DONE]') {
+        try {
+          var _fj = JSON.parse(_fp);
+          if (_fj.conversation_id && !effectiveConvId) effectiveConvId = _fj.conversation_id;
+          if (ImageStreamHandler.handleEvent(_fj, msgCt, msgEl, effectiveConvId || '__none__', prompt)) {
+            isImageGen = true;
+            if (stopBtn && stopBtn.parentNode) stopBtn.remove();
+          }
+        } catch(_e) {}
+      }
+      buffer = '';
+    }
         // ╔═══════════════════════════════════════════════╗
         // ║  IMAGE EVENTS — handled by ImageStreamHandler ║
         // ║  These NEVER touch DOMPurify or marked         ║
