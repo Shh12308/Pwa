@@ -25,6 +25,8 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+<!-- Mermaid for Diagrams -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
 <script>
 /* ═══ DOMPurify: allow data:image URIs ═══ */
 if(typeof DOMPurify!=='undefined'){
@@ -38,118 +40,161 @@ if(typeof DOMPurify!=='undefined'){
   });
 }
 
-/* ═══ Image Stream Handler ═══ */
-var ImageStreamHandler=(function(){
-  var S=new Map();
-  function $(p,c){if(!p||!c)return false;try{p.appendChild(c);return true}catch(e){return false}}
-  function X(o,n){if(!o||!o.parentNode||!n)return false;try{o.parentNode.replaceChild(n,o);return true}catch(e){try{o.parentNode.removeChild(o)}catch(e2){}return false}}
-  function loader(){
-    var e=document.createElement('div');e.className='img-gen-loader';
-    e.innerHTML='<div class="img-gen-loader-bg"></div><div style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:14px;pointer-events:none"><i class="fa-solid fa-wand-magic-sparkles" style="font-size:36px;color:var(--accent);opacity:.6;animation:spin 3s linear infinite"></i><span style="font-size:13px;color:var(--text-muted);font-weight:500">Generating image...</span><span style="font-size:11px;color:var(--text-muted);opacity:.5">This may take 10-30 seconds</span></div>';
-    return e;
+// ════════════════════════════════════════════════════════════
+// IMAGE UTILITIES (Modal, Download, Scroll)
+// ════════════════════════════════════════════════════════════
+
+function openImgModal(src) {
+  if (!src) return;
+  const modal = document.getElementById('img-modal');
+  const img = document.getElementById('modalImg');
+  if (!modal || !img) return;
+  img.src = src;
+  modal.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeImgModal() {
+  const modal = document.getElementById('img-modal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  document.body.style.overflow = '';
+  setTimeout(() => { if (!modal.classList.contains('open')) document.getElementById('modalImg').src = ''; }, 300);
+}
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeImgModal(); });
+
+function downloadGenImage(btnEl) {
+  const card = btnEl.closest('.gen-img-card') || btnEl.closest('.gen-img-wrap').parentElement;
+  const img = card.querySelector('img');
+  if (!img || !img.src) return;
+
+  const src = img.src;
+  if (!src.startsWith('data:')) {
+    const a = document.createElement('a');
+    a.href = src; a.download = 'heloxai-image.png'; a.target = '_blank';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    return;
   }
-  function card(b64,prompt){
-    if(!b64)return null;
-    var w=document.createElement('div');w.className='gen-img-card';
-    w.style.cssText='margin:16px 0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);position:relative';
-    var id='gi-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
-    var img=document.createElement('img');img.id=id;
-    img.alt=(prompt||'Generated image').replace(/[<>&"']/g,'').slice(0,200);
-    img.style.cssText='width:100%;display:block;border-radius:var(--radius);cursor:zoom-in;opacity:0;transition:opacity .5s ease,transform .4s cubic-bezier(.4,0,.2,1)';
-    img._ps='data:image/png;base64,'+b64;
-    img.addEventListener('click',function(){ImageStreamHandler.fullscreenById(id)});
-    var bd=document.createElement('div');
-    bd.style.cssText='position:absolute;bottom:10px;right:10px;display:flex;gap:6px;z-index:3';
-    bd.appendChild(mkBtn('fa-download','Download',function(e){e.stopPropagation();ImageStreamHandler.downloadById(id)}));
-    bd.appendChild(mkBtn('fa-expand','Fullscreen',function(e){e.stopPropagation();ImageStreamHandler.fullscreenById(id)}));
-    w.appendChild(img);w.appendChild(bd);
-    w._init=function(){
-      if(img._ps&&!img.src){img.src=img._ps;delete img._ps;}
-      requestAnimationFrame(function(){requestAnimationFrame(function(){img.style.opacity='1';img.classList.add('loaded')})});
-    };
-    return w;
-  }
-  function mkBtn(icon,title,fn){
-    var b=document.createElement('button');b.title=title;b.setAttribute('aria-label',title);
-    b.className='gen-img-btn';b.innerHTML='<i class="fa-solid '+icon+'"></i>';
-    b.addEventListener('click',fn);
-    return b;
-  }
-  function errBubble(msg){
-    var e=document.createElement('div');
-    e.style.cssText='margin:12px 0;padding:14px 18px;background:var(--adm-err-bg);border:1px solid var(--adm-err-border);border-radius:var(--radius-sm);color:var(--adm-err-text);font-size:13px;display:flex;align-items:center;gap:10px';
-    var i=document.createElement('i');i.className='fa-solid fa-circle-exclamation';i.style.flexShrink='0';
-    var s=document.createElement('span');s.textContent=(msg||'Image generation failed').replace(/[<>&"']/g,'');
-    e.appendChild(i);e.appendChild(s);return e;
-  }
-  function handle(p,ct,el,cid,prompt){
-    if(!p||typeof p!=='object'||!p.type)return false;
-    var t=p.type;
-    if(t!=='status'&&t!=='image'&&t!=='image_result'&&t!=='error')return false;
-    if(t==='status'){
-      var m=(p.message||'').toLowerCase();
-      if(!m.includes('image')&&!m.includes('generat')&&!m.includes('drawing'))return false;
-      if(!ct)return true;
-      if(el)el.classList.remove('streaming-cursor');
-      var ex=S.get(cid);if(ex&&ex.l)try{ex.l.parentNode.removeChild(ex.l)}catch(e){}
-      var l=loader();$(ct,l);S.set(cid,{l:l,p:prompt||'',b:null});return true;
+
+  const parts = src.split(',');
+  const mimeMatch = parts[0].match(/data:(image\/\w+);/);
+  const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+  const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+
+  try {
+    const byteChars = atob(parts[1]);
+    const byteArray = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
+    const blob = new Blob([byteArray], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `heloxai-${Date.now()}.${ext}`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) { console.error('Download failed:', e); }
+}
+
+function _scrollChat() {
+  const w = document.getElementById('msgsWrap');
+  if (w) requestAnimationFrame(() => { w.scrollTop = w.scrollHeight; });
+}
+
+// ════════════════════════════════════════════════════════════
+// CODE COPY BUTTONS
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Wire up copy buttons on all <pre> blocks inside a container.
+ * Call this after every markdown render — both during streaming
+ * (on each update) and after stream completion.
+ *
+ * Uses event delegation on the container to avoid duplicate listeners.
+ */
+function initCodeCopyButtons(container) {
+  if (!container) return;
+
+  // Remove any stale delegation listener to avoid duplicates
+  if (container._codeCopyInit) return;
+  container._codeCopyInit = true;
+
+  container.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.code-copy-btn');
+    if (!btn) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const pre = btn.closest('pre');
+    if (!pre) return;
+
+    const code = pre.querySelector('code');
+    if (!code) return;
+
+    // Get clean text content (strip any trailing newline artifacts)
+    let text = code.textContent || code.innerText || '';
+
+    try {
+      await navigator.clipboard.writeText(text);
+
+      // Success state
+      btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+      btn.classList.add('copied');
+
+      setTimeout(() => {
+        btn.innerHTML = '<i class="fa-regular fa-clipboard"></i>';
+        btn.classList.remove('copied');
+      }, 2000);
+    } catch (err) {
+      // Fallback for older browsers / insecure contexts
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.innerHTML = '<i class="fa-regular fa-clipboard"></i>';
+          btn.classList.remove('copied');
+        }, 2000);
+      } catch (fallbackErr) {
+        btn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        setTimeout(() => {
+          btn.innerHTML = '<i class="fa-regular fa-clipboard"></i>';
+        }, 2000);
+      }
+      document.body.removeChild(textarea);
     }
-    if(t==='image'||t==='image_result'){
-      var b=p.data||p.image||p.base64||null;if(!b)return true;
-      if(!ct){S.set(cid,{l:null,p:prompt||'',b:b});return true;}
-      var c=card(b,prompt||'');if(!c)return true;
-      var st=S.get(cid);var ok=false;
-      if(st&&st.l)ok=X(st.l,c);
-      if(!ok)$(ct,c);
-      if(c._init)c._init();
-      S.set(cid,{l:null,p:prompt||'',b:b});
-      if(el){el.classList.remove('streaming-cursor','msg-streaming');var s=el.querySelector('.ai-status');if(s)s.style.display='none';}
-      return true;
-    }
-    if(t==='error'){
-      if(!ct)return true;
-      var es=S.get(cid);var eok=false;
-      if(es&&es.l)eok=X(es.l,errBubble(p.message));
-      if(!eok)$(ct,errBubble(p.message));
-      if(el)el.classList.remove('streaming-cursor','msg-streaming');
-      S.delete(cid);return true;
-    }
-    return false;
-  }
-  function cleanup(cid){
-    var s=S.get(cid);
-    if(s&&s.l){var c=card(s.b,s.p);if(c){X(s.l,c);if(c._init)c._init();}else try{s.l.parentNode.removeChild(s.l)}catch(e){}}
-    S.delete(cid);
-  }
-  function getB64(cid){var s=S.get(cid);return s?s.b:null;}
-  function dl(id){
-    try{var i=document.getElementById(id);if(!i||!i.src||i.src===location.href)return;
-    var a=document.createElement('a');a.href=i.src;a.download='heloxai-'+Date.now()+'.png';
-    document.body.appendChild(a);a.click();document.body.removeChild(a);}catch(e){}
-  }
-  function fs(id){
-    try{var i=document.getElementById(id);if(!i||!i.src||i.src===location.href)return;
-    var m=document.getElementById('img-modal');
-    if(!m){m=document.createElement('div');m.id='img-modal';
-    m.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.88);backdrop-filter:blur(14px);display:none;align-items:center;justify-content:center;padding:24px;cursor:zoom-out;opacity:0;transition:opacity .25s ease';
-    m.addEventListener('click',function(e){if(e.target===m)ImageStreamHandler.closeFullscreen()});document.body.appendChild(m);}
-    m.innerHTML='';var mi=document.createElement('img');mi.src=i.src;mi.alt='';
-    mi.style.cssText='max-width:95vw;max-height:92vh;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.5);object-fit:contain';
-    m.appendChild(mi);m.style.display='flex';requestAnimationFrame(function(){m.style.opacity='1'});
-    var h=function(e){if(e.key==='Escape'){ImageStreamHandler.closeFullscreen();document.removeEventListener('keydown',h)}};document.addEventListener('keydown',h);
-    }catch(e){}
-  }
-  function cfs(){var m=document.getElementById('img-modal');if(m){m.style.opacity='0';setTimeout(function(){m.style.display='none'},250)}}
-  function histHTML(b64,prompt){
-    if(!b64)return'';var id='hi-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
-    var a=(prompt||'Generated image').replace(/[<>&"']/g,'').slice(0,200);
-    return'<div class="gen-img-card" style="margin:16px 0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);position:relative"><img id="'+id+'" src="data:image/png;base64,'+b64+'" alt="'+a+'" style="width:100%;display:block;border-radius:var(--radius);cursor:zoom-in;opacity:1" onclick="ImageStreamHandler.fullscreenById(\''+id+'\')"/><div style="position:absolute;bottom:10px;right:10px;display:flex;gap:6px;z-index:3"><button onclick="event.stopPropagation();ImageStreamHandler.downloadById(\''+id+'\')" class="gen-img-btn" title="Download"><i class="fa-solid fa-download"></i></button><button onclick="event.stopPropagation();ImageStreamHandler.fullscreenById(\''+id+'\')" class="gen-img-btn" title="Fullscreen"><i class="fa-solid fa-expand"></i></button></div></div>';
-  }
-  return{handleEvent:handle,cleanup:cleanup,getBase64:getB64,downloadById:dl,fullscreenById:fs,closeFullscreen:cfs,buildHistoryHTML:histHTML,createLoader:loader};
-})();
+  });
+}
+
+/**
+ * Add copy buttons to all <pre> blocks that don't have one yet.
+ * Call this after inserting rendered markdown HTML into the DOM.
+ */
+function addCopyButtonsToPreBlocks(container) {
+  if (!container) return;
+
+  const pres = container.querySelectorAll('pre');
+  pres.forEach((pre) => {
+    if (pre.querySelector('.code-copy-btn')) return; // already has one
+
+    const btn = document.createElement('button');
+    btn.className = 'code-copy-btn';
+    btn.innerHTML = '<i class="fa-regular fa-clipboard"></i>';
+    btn.title = 'Copy code';
+    btn.setAttribute('aria-label', 'Copy code to clipboard');
+    pre.style.position = 'relative';
+    pre.appendChild(btn);
+  });
+
+  // Ensure delegation is wired up
+  initCodeCopyButtons(container);
+}
 </script>
-<!-- Mermaid for Diagrams -->
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
 
 <style>
 /* =========================================
@@ -731,175 +776,67 @@ pre:hover .code-copy-btn{opacity:1}
   font-weight: 500;
   cursor: pointer;
   transition: all .15s;
-  flex-shrink: 0;
   text-decoration: none;
 }
-.source-chip:hover {
-  border-color: var(--border-active);
-  color: var(--accent);
-  background: var(--accent-dim);
-}
-.source-chip-img {
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
-  object-fit: cover;
-  background: var(--bg-quaternary);
-}
+.source-chip:hover { border-color: var(--border-active); color: var(--accent); background: var(--accent-dim); }
+.source-chip-img { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
 
-/* Individual Search Result Card */
+/* Search Result Cards */
 .search-card {
-  display: flex;
-  gap: 14px;
-  margin: 12px 0;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-tertiary);
-  text-decoration: none;
-  color: var(--text-primary);
-  transition: all .2s var(--ease);
-  position: relative;
-  overflow: hidden;
+  display: flex; gap: 12px; padding: 10px 14px;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 10px; text-decoration: none; color: inherit;
+  transition: all .15s; margin-bottom: 6px;
 }
-.search-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, var(--accent-dim), transparent);
-  opacity: 0;
-  transition: opacity .2s;
-}
-.search-card:hover {
-  background: var(--bg-hover);
-  border-color: var(--border-active);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
-}
-.search-card:hover::before { opacity: 1; }
+.search-card:hover { border-color: var(--border-active); background: var(--bg-hover); }
+.search-card.compact { padding: 10px 14px; }
+.search-thumb { width: 80px; height: 60px; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
+.search-info { flex: 1; min-width: 0; }
+.search-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-link { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.search-link-favicon { width: 12px; height: 12px; flex-shrink: 0; }
+.search-snippet { font-size: 12px; color: var(--text-secondary); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
-/* Search card thumbnail */
-.search-thumb {
-  width: 88px;
-  height: 88px;
-  border-radius: 8px;
-  object-fit: cover;
-  background: var(--bg-quaternary);
-  flex-shrink: 0;
-  border: 1px solid var(--border);
-  position: relative;
-  z-index: 1;
-}
+/* =========================================
+   IMAGE STREAMING — PROGRESSIVE REVEAL
+   ========================================= */
+.img-stream-container{position:relative;margin:8px 0 16px;border-radius:var(--radius);overflow:hidden;background:var(--bg-secondary);border:1px solid var(--border)}
+.img-stream-viewport{position:relative;min-height:180px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--bg-tertiary)}
+.img-stream-shimmer{position:absolute;inset:0;background:linear-gradient(110deg,transparent 30%,rgba(255,255,255,.04) 50%,transparent 70%);background-size:200% 100%;animation:shimmerSlide 1.8s ease-in-out infinite}
+.img-stream-shimmer.hidden{display:none}
+@keyframes shimmerSlide{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.img-stream-preview{max-width:100%;max-height:520px;object-fit:contain;opacity:0;transition:filter .35s ease,transform .35s ease,opacity .3s ease;display:block;border-radius:4px}
+.img-stream-preview.visible{opacity:1}
+.img-stream-progress-track{position:absolute;bottom:0;left:0;right:0;height:3px;background:rgba(255,255,255,.06)}
+.img-stream-progress-fill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),rgba(255,255,255,.7));border-radius:0 2px 2px 0;transition:width .25s ease}
+.img-stream-label{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:6px 14px;background:rgba(0,0,0,.65);backdrop-filter:blur(8px);border-radius:20px;font-size:12px;color:var(--text-secondary);white-space:nowrap;transition:opacity .3s ease}
+.img-stream-label.fade-out{opacity:0;pointer-events:none}
+.img-stream-label i{color:var(--accent);font-size:13px}
 
-/* Search image loading states */
-.search-thumb {
-  background: var(--bg-quaternary);
-  object-fit: cover;
-  color: transparent;
-  -webkit-user-select: none;
-  user-select: none;
-}
-.search-thumb[src=""],
-.search-thumb:not([src]) {
-  display: none;
-}
-.source-chip-img,
-.search-link-favicon {
-  background: var(--bg-quaternary);
-  border-radius: 3px;
-  color: transparent;
-  -webkit-user-select: none;
-  user-select: none;
-}
-.source-chip-img[src=""],
-.search-link-favicon[src=""] {
-  display: none;
-}
-/* Search card image aspect ratio fix */
-.search-card .search-thumb {
-  aspect-ratio: 1 / 1;
-  width: 88px;
-  height: 88px;
-  flex-shrink: 0;
-}
-/* Smooth image load-in */
-.search-card .search-thumb,
-.gen-img-card img {
-  opacity: 0;
-  transition: opacity 0.3s ease, transform 0.4s var(--ease);
-}
-.search-card .search-thumb.loaded,
-.gen-img-card img.loaded {
-  opacity: 1;
-}
-.search-card:hover .search-thumb.loaded {
-  transform: scale(1.03);
-}
+/* --- Final generated image card --- */
+.gen-img-card{margin:10px 0 16px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);transition:border-color var(--speed)}
+.gen-img-card:hover{border-color:var(--border-active)}
+.gen-img-wrap{position:relative;cursor:pointer;overflow:hidden}
+.gen-img-final{width:100%;display:block;opacity:0;transition:opacity .5s ease}
+.gen-img-final.loaded{opacity:1}
+.gen-img-hover-overlay{position:absolute;inset:0;background:linear-gradient(0deg,rgba(0,0,0,.55) 0%,transparent 50%);display:flex;align-items:flex-end;justify-content:center;gap:10px;padding:16px;opacity:0;transition:opacity .25s ease}
+.gen-img-wrap:hover .gen-img-hover-overlay{opacity:1}
+.gen-img-action{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:rgba(255,255,255,.12);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.15);border-radius:10px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;font-family:var(--font-body)}
+.gen-img-action:hover{background:rgba(255,255,255,.22);transform:translateY(-1px)}
 
-/* Search card info */
-.search-info {
-  flex: 1;
-  min-width: 0;
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-.search-title {
-  font-weight: 700;
-  font-size: 14px;
-  margin-bottom: 4px;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: color .15s;
-}
-.search-card:hover .search-title { color: var(--accent); }
-.search-link {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-bottom: 7px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.search-link-favicon {
-  width: 12px;
-  height: 12px;
-  border-radius: 2px;
-  background: var(--bg-quaternary);
-  flex-shrink: 0;
-}
-.search-snippet {
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.55;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.search-snippet mark {
-  background: rgba(16, 185, 129, 0.25);
-  color: var(--text-primary);
-  padding: 1px 3px;
-  border-radius: 3px;
-  font-weight: 600;
-}
+/* --- Image stream error --- */
+.img-stream-error{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--bg-secondary);border:1px solid rgba(239,68,68,.2);border-radius:var(--radius-sm);color:var(--danger);font-size:13px;margin:8px 0 16px}
+.img-stream-error i{font-size:16px;flex-shrink:0}
 
-/* Compact search card (no thumbnail) */
-.search-card.compact {
-  padding: 10px 14px;
-}
-.search-card.compact .search-thumb { display: none; }
-.search-card.compact .search-snippet {
-  -webkit-line-clamp: 2;
-}
+/* =========================================
+   FULLSCREEN IMAGE MODAL
+   ========================================= */
+#img-modal{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.88);backdrop-filter:blur(16px);opacity:0;pointer-events:none;transition:opacity .3s ease;padding:24px}
+#img-modal.open{opacity:1;pointer-events:all}
+.img-modal-close{position:absolute;top:16px;right:16px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;z-index:2}
+.img-modal-close:hover{background:rgba(255,255,255,.2);transform:scale(1.05)}
+.img-modal-img{max-width:95vw;max-height:92vh;object-fit:contain;border-radius:var(--radius);box-shadow:0 8px 60px rgba(0,0,0,.6);transform:scale(.95);transition:transform .35s cubic-bezier(0,0,.2,1)}
+#img-modal.open .img-modal-img{transform:scale(1)}
 
 /* Inline citation badge [1] [2] */
 .cite-badge {
@@ -922,46 +859,11 @@ pre:hover .code-copy-btn{opacity:1}
   text-decoration: none;
   line-height: 1;
 }
-.cite-badge:hover{background:var(--accent);color:#fff;transform:scale(1.1)}
-
-.cite-badge:hover{background:var(--accent);color:#fff;transform:scale(1.1)}
-.search-group{margin:18px 0;padding:14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-secondary)}
-.search-group-title{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
-.search-group-title i{color:var(--accent);font-size:13px}
-.search-qa-item{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s}
-.search-qa-item:last-child{border-bottom:none}
-.search-qa-item:hover{background:var(--bg-hover)}
-.search-qa-q{font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:10px}
-.search-qa-q i{color:var(--accent);font-size:12px;flex-shrink:0}
-.search-qa-a{font-size:13px;color:var(--text-secondary);line-height:1.6;margin-top:6px;padding-left:22px;display:none}
-.search-qa-item.open .search-qa-a{display:block}
-.img-gen-loader-bg{position:absolute;inset:0;background:linear-gradient(110deg,var(--bg-tertiary) 8%,var(--bg-quaternary) 18%,var(--bg-tertiary) 33%);background-size:200% 100%;animation:imgShimmer 1.5s ease-in-out infinite;pointer-events:none}
-.gen-img-card{margin:16px 0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);position:relative}
-.gen-img-card img{width:100%;display:block;border-radius:var(--radius);cursor:zoom-in}
-.gen-img-card img.loaded{opacity:1!important}
-.gen-img-btn{width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.6);backdrop-filter:blur(8px);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;-webkit-appearance:none;appearance:none}
-.gen-img-btn:hover{background:rgba(0,0,0,.85);transform:scale(1.05)}
-
-/* ===== IMAGE GEN (completes truncated section) ===== */
-.img-gen-loader-bg{position:absolute;inset:0;background:linear-gradient(110deg,var(--bg-tertiary) 8%,var(--bg-quaternary) 18%,var(--bg-tertiary) 33%);background-size:200% 100%;animation:imgShimmer 1.5s ease-in-out infinite;pointer-events:none}
-.gen-img-card{margin:16px 0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);position:relative}
-.gen-img-card img{width:100%;display:block;border-radius:var(--radius);cursor:zoom-in}
-.gen-img-card img.loaded{opacity:1!important}
-.gen-img-btn{width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.6);backdrop-filter:blur(8px);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;-webkit-appearance:none;appearance:none}
-.gen-img-btn:hover{background:rgba(0,0,0,.85);transform:scale(1.05)}
-
-/* Search result group container */
-.search-group{margin:18px 0;padding:14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-secondary)}
-.search-group-title{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
-.search-group-title i{color:var(--accent);font-size:13px}
-.search-qa-item{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s}
-.search-qa-item:last-child{border-bottom:none}
-.search-qa-item:hover{background:var(--bg-hover)}
-.search-qa-q{font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:10px}
-.search-qa-q i{color:var(--accent);font-size:12px;flex-shrink:0}
-.search-qa-a{font-size:13px;color:var(--text-secondary);line-height:1.6;margin-top:6px;padding-left:22px;display:none}
-.search-qa-item.open .search-qa-a{display:block}
-
+.cite-badge:hover {
+  background: var(--accent);
+  color: #fff;
+  transform: scale(1.1);
+}
 
 /* Search result group container */
 .search-group {
@@ -1273,6 +1175,59 @@ pre:hover .code-copy-btn{opacity:1}
 .gen-img-card.landscape img{aspect-ratio:3/2}
 .gen-img-card.portrait img{aspect-ratio:2/3}
 .gen-img-card.square img{aspect-ratio:1/1}
+
+/* Code copy button — ensure this exists */
+.code-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+  opacity: 0;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-body);
+  line-height: 1;
+}
+pre:hover .code-copy-btn { opacity: 1; }
+.code-copy-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-active);
+}
+.code-copy-btn.copied {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Ensure pre blocks are positioned for absolute button */
+.msg-ct pre {
+  position: relative;
+}
+
+/* Image error */
+.img-stream-error {
+  margin: 16px 0;
+  padding: 20px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(239,68,68,0.2);
+  background: rgba(239,68,68,0.06);
+  color: var(--danger);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  animation: slideUpFade 0.3s ease both;
+}
+.img-stream-error i { font-size: 18px; flex-shrink: 0; }
 
 /* Loader aspect ratio variants */
 .img-gen-loader.landscape{aspect-ratio:3/2}
@@ -2798,6 +2753,47 @@ svg .katex, svg .katex-html,
   .sidebar{width:100%;--sidebar-w:100%}.w-grid{grid-template-columns:1fr}.as-grid{grid-template-columns:1fr}.msgs-inner{padding:16px 16px 8px}.msg-acts{opacity:1}.gal-grid{grid-template-columns:repeat(2,1fr);gap:10px}.msg.ai-msg{padding-right:20px}.msg.user-msg{padding-left:20px}.msg.user-msg .msg-inner{max-width:94%}.model-sel{display:none}.cb-foot{display:none}.w-logo{font-size:40px}.w-sub{font-size:15px;margin-bottom:40px}.sidebar{border-right:none}.msg-img-item.single{max-width:220px}.msg-img-item.single img{max-width:220px;max-height:280px}.msg-img-item.multi{width:110px;height:110px}.msg-img-item.multi img{width:110px;height:110px}.em-modal{width:100%}.chat-hdr{padding:8px 12px}.cb-container{padding-left:12px;padding-right:12px}.toast-ct{right:12px;left:12px;top:12px}.toast{max-width:none;width:100%}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* =========================================
+   IMAGE STREAMING — PROGRESSIVE REVEAL
+   ========================================= */
+.img-stream-container{position:relative;margin:8px 0 16px;border-radius:var(--radius);overflow:hidden;background:var(--bg-secondary);border:1px solid var(--border)}
+.img-stream-viewport{position:relative;min-height:180px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--bg-tertiary)}
+.img-stream-shimmer{position:absolute;inset:0;background:linear-gradient(110deg,transparent 30%,rgba(255,255,255,.04) 50%,transparent 70%);background-size:200% 100%;animation:shimmerSlide 1.8s ease-in-out infinite}
+.img-stream-shimmer.hidden{display:none}
+@keyframes shimmerSlide{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.img-stream-preview{max-width:100%;max-height:520px;object-fit:contain;opacity:0;transition:filter .35s ease,transform .35s ease,opacity .3s ease;display:block;border-radius:4px}
+.img-stream-preview.visible{opacity:1}
+.img-stream-progress-track{position:absolute;bottom:0;left:0;right:0;height:3px;background:rgba(255,255,255,.06)}
+.img-stream-progress-fill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),rgba(255,255,255,.7));border-radius:0 2px 2px 0;transition:width .25s ease}
+.img-stream-label{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:6px 14px;background:rgba(0,0,0,.65);backdrop-filter:blur(8px);border-radius:20px;font-size:12px;color:var(--text-secondary);white-space:nowrap;transition:opacity .3s ease}
+.img-stream-label.fade-out{opacity:0;pointer-events:none}
+.img-stream-label i{color:var(--accent);font-size:13px}
+
+/* --- Final generated image card --- */
+.gen-img-card{margin:10px 0 16px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);transition:border-color var(--speed)}
+.gen-img-card:hover{border-color:var(--border-active)}
+.gen-img-wrap{position:relative;cursor:pointer;overflow:hidden}
+.gen-img-final{width:100%;display:block;opacity:0;transition:opacity .5s ease}
+.gen-img-final.loaded{opacity:1}
+.gen-img-hover-overlay{position:absolute;inset:0;background:linear-gradient(0deg,rgba(0,0,0,.55) 0%,transparent 50%);display:flex;align-items:flex-end;justify-content:center;gap:10px;padding:16px;opacity:0;transition:opacity .25s ease}
+.gen-img-wrap:hover .gen-img-hover-overlay{opacity:1}
+.gen-img-action{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:rgba(255,255,255,.12);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.15);border-radius:10px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;font-family:var(--font-body)}
+.gen-img-action:hover{background:rgba(255,255,255,.22);transform:translateY(-1px)}
+
+/* --- Image stream error --- */
+.img-stream-error{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--bg-secondary);border:1px solid rgba(239,68,68,.2);border-radius:var(--radius-sm);color:var(--danger);font-size:13px;margin:8px 0 16px}
+.img-stream-error i{font-size:16px;flex-shrink:0}
+
+/* =========================================
+   FULLSCREEN IMAGE MODAL
+   ========================================= */
+#img-modal{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.88);backdrop-filter:blur(16px);opacity:0;pointer-events:none;transition:opacity .3s ease;padding:24px}
+#img-modal.open{opacity:1;pointer-events:all}
+.img-modal-close{position:absolute;top:16px;right:16px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;z-index:2}
+.img-modal-close:hover{background:rgba(255,255,255,.2);transform:scale(1.05)}
+.img-modal-img{max-width:95vw;max-height:92vh;object-fit:contain;border-radius:var(--radius);box-shadow:0 8px 60px rgba(0,0,0,.6);transform:scale(.95);transition:transform .35s cubic-bezier(0,0,.2,1)}
+#img-modal.open .img-modal-img{transform:scale(1)}
 </style>
 </head>
 <body>
@@ -3099,20 +3095,74 @@ async function sendMessage(prompt){
 
 // ── IMAGE GENERATION STREAMING HANDLERS ──
 
-case "image_generating":
-  // Show ChatGPT-style loader in the AI message
-  handleImageGenerating(event);
-  break;
+// Inside your fetch/SSE read loop, replace whatever switch/if
+// handles parsed event types with this:
 
-case "image_generated":
-  // Replace loader with the actual image, smooth reveal
-  handleImageGenerated(event);
-  break;
+let _imageWasGenerated = false;
 
-case "image_progress":
-  // Optional: update progress text
-  handleImageProgress(event);
-  break;
+for (const line of lines) {
+  if (!line.startsWith('data: ')) continue;
+  const payload = line.slice(6).trim();
+  if (payload === '[DONE]') continue;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(payload);
+  } catch (e) {
+    // Not valid JSON — your existing raw text fallback if any
+    continue;
+  }
+
+  // Inside your SSE parsing loop, where you do:
+//   const evt = JSON.parse(payload);
+//   switch (evt.type) { ... }
+
+switch (evt.type) {
+
+  /* ── IMAGE GENERATION EVENTS ── */
+  case 'image_generating':
+    handleImageGenerating();
+    break;
+
+  case 'image_progress':
+    handleImageProgress(evt);
+    break;
+
+  case 'image_generated':
+    handleImageGenerated(evt);
+    break;
+
+  case 'image_error':
+    handleImageError(evt);
+    break;
+
+  /* ── TEXT STREAMING ── */
+  case 'text_delta':
+    // Your existing text delta handling — append to currentMsgText,
+    // update the .msg-ct innerHTML, run marked.parse(), highlight, KaTeX, etc.
+    // Example:
+    currentMsgText += (evt.content || '');
+    msgCt.innerHTML = renderMarkdown(currentMsgText);
+    addCopyButtonsToPreBlocks(msgCt);
+    msgCt.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+    try { renderMathInElement(msgCt, mathOpts); } catch(e) {}
+    _scrollChat();
+    break;
+
+  /* ── SEARCH RESULTS ── */
+  case 'search_results':
+    if (evt.html) {
+      const searchDiv = document.createElement('div');
+      searchDiv.innerHTML = evt.html;
+      msgCt.prepend(searchDiv);
+      _scrollChat();
+    }
+    break;
+
+  /* ── FALLBACK ── */
+  default:
+    console.debug('Unknown SSE event:', evt.type, evt);
+}
 
         case 'status':status.textContent=ev.message||'';status.style.display='inline-flex';if(/generat.*image/i.test(ev.message||''))showImageSkeleton(aiEl);break;
         case 'token':raw+=(ev.text||'');status.textContent='responding...';scheduleRender(ct,raw,searchHtml);break;
@@ -5033,7 +5083,7 @@ function doSTT(blob){
 }
 
 /* ========== STREAMING ========== */
-function streamRes(res, onChunk, onDone, onMedia, onStatus) {
+function streamRes(res, onChunk, onDone, onMedia, onStatus, onImageEvent) {
     if (!res.body || typeof res.body.getReader !== 'function') {
         return res.text().then(function (t) { onChunk(t); onDone(); });
     }
@@ -5049,10 +5099,44 @@ function streamRes(res, onChunk, onDone, onMedia, onStatus) {
         if (line === '[DONE]') { onDone(); finished = true; return; }
         try {
             var json = JSON.parse(line);
+
+            // ── IMAGE STREAMING EVENTS ──
+            if (json.type === 'image_generating') {
+                if (typeof onImageEvent === 'function') onImageEvent(json);
+                return;
+            }
+            if (json.type === 'image_progress') {
+                if (typeof onImageEvent === 'function') onImageEvent(json);
+                return;
+            }
+            if (json.type === 'image_generated') {
+                if (typeof onImageEvent === 'function') onImageEvent(json);
+                return;
+            }
+            if (json.type === 'image_error') {
+                if (typeof onImageEvent === 'function') onImageEvent(json);
+                return;
+            }
+
+            // ── EXPLICIT TEXT DELTA ──
+            if (json.type === 'text_delta') {
+                if (json.content) onChunk(json.content);
+                return;
+            }
+
+            // ── SEARCH RESULTS ──
+            if (json.type === 'search_results') {
+                if (typeof onMedia === 'function') onMedia(json);
+                return;
+            }
+
+            // ── LEGACY MEDIA / STATUS ──
             if (json.type === 'media' && typeof onMedia === 'function') { onMedia(json); return; }
             if (json.type === 'status' && typeof onStatus === 'function') { onStatus(json.message); return; }
-            var text = json.token || json.text || json.content || (json.delta && json.delta.content) || '';
-            if (text) { onChunk(text); }
+
+            // ── FALLBACK TEXT ──
+            var text = json.token || json.text || (json.delta && json.delta.content) || '';
+            if (text && json.type !== 'done') { onChunk(text); }
         } catch (e) {}
     }
 
@@ -5074,7 +5158,7 @@ function streamRes(res, onChunk, onDone, onMedia, onStatus) {
         });
     }
     return pump();
-}
+} 
 
 /* ========== SEND MESSAGES ========== */
 async function sendMsg(text){
@@ -5151,797 +5235,229 @@ function sendWithFiles(text,imgs,files){
   }).finally(function(){S.streaming=false;S.abort=null;updateCB();});
 }
 
-/* ═══════════════════════════════════════════════════════════════════
-   FIX 1: DOMPurify MUST allow data: URIs — add this RIGHT AFTER
-   the DOMPurify script loads, BEFORE any other code uses it.
-   Without this, every data:image src gets silently deleted,
-   leaving null elements that crash on .value / .src access.
-   ═══════════════════════════════════════════════════════════════════ */
-if (typeof DOMPurify !== 'undefined') {
-  DOMPurify.addHook('uponSanitizeAttribute', function(node, data) {
-    // Allow data:image URIs in src attributes
-    if (data.attrName === 'src' && data.attrValue && data.attrValue.startsWith('data:image/')) {
-      node.setAttribute('data-preserve-src', data.attrValue);
-    }
-  });
-  DOMPurify.addHook('afterSanitizeAttributes', function(node) {
-    const preserved = node.getAttribute('data-preserve-src');
-    if (preserved) {
-      node.setAttribute('src', preserved);
-      node.removeAttribute('data-preserve-src');
-    }
-  });
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   FIX 2: Complete Image Stream Handler — every DOM call guarded
-   ═══════════════════════════════════════════════════════════════════ */
-const ImageStreamHandler = (() => {
-  const _streams = new Map();
-
-  function _safeAppend(parent, child) {
-    if (!parent || !child) return false;
-    try { parent.appendChild(child); return true; } catch(e) { console.warn('[ImgStream] append failed:', e); return false; }
-  }
-
-  function _safeRemove(el) {
-    if (!el || !el.parentNode) return;
-    try { el.parentNode.removeChild(el); } catch(e) {}
-  }
-
-  function _safeReplace(oldEl, newEl) {
-    if (!oldEl || !oldEl.parentNode || !newEl) return false;
-    try { oldEl.parentNode.replaceChild(newEl, oldEl); return true; } catch(e) {
-      console.warn('[ImgStream] replace failed:', e);
-      _safeRemove(oldEl);
-      return false;
-    }
-  }
-
-  function createLoader() {
-    const el = document.createElement('div');
-    el.className = 'img-gen-loader';
-    el.setAttribute('role', 'status');
-    el.setAttribute('aria-label', 'Generating image');
-    el.innerHTML =
-      '<div class="img-gen-loader-bg"></div>' +
-      '<div style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:14px;pointer-events:none">' +
-        '<i class="fa-solid fa-wand-magic-sparkles" style="font-size:36px;color:var(--accent);opacity:.6;animation:spin 3s linear infinite"></i>' +
-        '<span style="font-size:13px;color:var(--text-muted);font-weight:500">Generating image...</span>' +
-        '<span style="font-size:11px;color:var(--text-muted);opacity:.5">This may take 10-30 seconds</span>' +
-      '</div>';
-    return el;
-  }
-
-  function createImageCard(b64Data, promptText) {
-    if (!b64Data) return null;
-
-    const wrapper = document.createElement('div');
-    wrapper.className = 'gen-img-card';
-    wrapper.style.cssText =
-      'margin:16px 0;border-radius:var(--radius);overflow:hidden;' +
-      'border:1px solid var(--border);background:var(--bg-secondary);position:relative;';
-
-    const uid = 'gi-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    const safeAlt = (promptText || 'Generated image').replace(/[<>&"']/g, '').slice(0, 200);
-
-    // Use DOM API — NOT innerHTML — to avoid DOMPurify/marked interference
-    const img = document.createElement('img');
-    img.id = uid;
-    img.alt = safeAlt;
-    img.style.cssText =
-      'width:100%;display:block;border-radius:var(--radius);cursor:zoom-in;' +
-      'opacity:0;transition:opacity .5s ease,transform .4s cubic-bezier(.4,0,.2,1);';
-    // Set src AFTER element is in DOM to avoid some browser quirks with huge data URIs
-    img._pendingSrc = 'data:image/png;base64,' + b64Data;
-    img.addEventListener('click', function() { ImageStreamHandler.fullscreenById(uid); });
-
-    // Action buttons container
-    const btns = document.createElement('div');
-    btns.style.cssText =
-      'position:absolute;bottom:10px;right:10px;display:flex;gap:6px;z-index:3';
-
-    const dlBtn = document.createElement('button');
-    dlBtn.title = 'Download image';
-    dlBtn.setAttribute('aria-label', 'Download image');
-    dlBtn.style.cssText =
-      'width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.15);' +
-      'background:rgba(0,0,0,.6);backdrop-filter:blur(8px);color:#fff;font-size:13px;' +
-      'cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s';
-    dlBtn.innerHTML = '<i class="fa-solid fa-download"></i>';
-    dlBtn.addEventListener('click', function(e) { e.stopPropagation(); ImageStreamHandler.downloadById(uid); });
-    dlBtn.addEventListener('mouseover', function() { this.style.background = 'rgba(0,0,0,.8)'; });
-    dlBtn.addEventListener('mouseout', function() { this.style.background = 'rgba(0,0,0,.6)'; });
-
-    const fsBtn = document.createElement('button');
-    fsBtn.title = 'View fullscreen';
-    fsBtn.setAttribute('aria-label', 'View fullscreen');
-    fsBtn.style.cssText = dlBtn.style.cssText;
-    fsBtn.innerHTML = '<i class="fa-solid fa-expand"></i>';
-    fsBtn.addEventListener('click', function(e) { e.stopPropagation(); ImageStreamHandler.fullscreenById(uid); });
-    fsBtn.addEventListener('mouseover', function() { this.style.background = 'rgba(0,0,0,.8)'; });
-    fsBtn.addEventListener('mouseout', function() { this.style.background = 'rgba(0,0,0,.6)'; });
-
-    btns.appendChild(dlBtn);
-    btns.appendChild(fsBtn);
-    wrapper.appendChild(img);
-    wrapper.appendChild(btns);
-
-    // After appending to DOM, set the src and trigger fade-in
-    wrapper._initImg = function() {
-      if (img._pendingSrc && !img.src) {
-        img.src = img._pendingSrc;
-        delete img._pendingSrc;
-      }
-      requestAnimationFrame(function() {
-        requestAnimationFrame(function() {
-          img.style.opacity = '1';
-          img.classList.add('loaded');
-        });
-      });
-    };
-
-    return wrapper;
-  }
-
-  function createErrorBubble(message) {
-    const el = document.createElement('div');
-    el.style.cssText =
-      'margin:12px 0;padding:14px 18px;background:var(--adm-err-bg);' +
-      'border:1px solid var(--adm-err-border);border-radius:var(--radius-sm);' +
-      'color:var(--adm-err-text);font-size:13px;display:flex;align-items:center;gap:10px;';
-    const icon = document.createElement('i');
-    icon.className = 'fa-solid fa-circle-exclamation';
-    icon.style.flexShrink = '0';
-    const span = document.createElement('span');
-    span.textContent = (message || 'Image generation failed').replace(/[<>&"']/g, '');
-    el.appendChild(icon);
-    el.appendChild(span);
-    return el;
-  }
-
-  /**
-   * Main event handler — call from your SSE loop.
-   * Returns true if the event was an image event (handled).
-   * Returns false if not an image event (let text handler process it).
-   */
-  function handleEvent(parsed, msgCt, msgEl, convId, prompt) {
-    if (!parsed || typeof parsed !== 'object' || !parsed.type) return false;
-    var t = parsed.type;
-
-    // Only intercept these specific types
-    if (t !== 'status' && t !== 'image' && t !== 'image_result' && t !== 'error') return false;
-
-    // Status events — only intercept image-related ones
-    if (t === 'status') {
-      var msg = (parsed.message || '').toLowerCase();
-      if (!msg.includes('image') && !msg.includes('generat') && !msg.includes('drawing')) return false;
-
-      // Null guard: if msgCt doesn't exist, we can't show anything — skip silently
-      if (!msgCt) {
-        console.warn('[ImgStream] status event but msgCt is null');
-        return true;
-      }
-
-      // Remove cursor — this is image, not text
-      if (msgEl) {
-        msgEl.classList.remove('streaming-cursor');
-      }
-
-      // Remove any previous loader for this conv
-      var existing = _streams.get(convId);
-      if (existing && existing.loaderEl) {
-        _safeRemove(existing.loaderEl);
-      }
-
-      var loader = createLoader();
-      _safeAppend(msgCt, loader);
-      _streams.set(convId, { loaderEl: loader, prompt: prompt || '', rawB64: null });
-      return true;
-    }
-
-    // Image result
-    if (t === 'image' || t === 'image_result') {
-      var b64 = parsed.data || parsed.image || parsed.base64 || null;
-      if (!b64) return true; // handled but no data
-
-      if (!msgCt) {
-        console.warn('[ImgStream] image event but msgCt is null');
-        _streams.set(convId, { loaderEl: null, prompt: prompt || '', rawB64: b64 });
-        return true;
-      }
-
-      var card = createImageCard(b64, prompt || '');
-      if (!card) return true;
-
-      var state = _streams.get(convId);
-      var replaced = false;
-      if (state && state.loaderEl) {
-        replaced = _safeReplace(state.loaderEl, card);
-      }
-      if (!replaced) {
-        _safeAppend(msgCt, card);
-      }
-
-      // Initialize the image src AFTER it's in the DOM tree
-      if (card._initImg) card._initImg();
-
-      _streams.set(convId, { loaderEl: null, prompt: prompt || '', rawB64: b64 });
-
-      if (msgEl) {
-        msgEl.classList.remove('streaming-cursor', 'msg-streaming');
-        var statusEl = msgEl.querySelector('.ai-status');
-        if (statusEl) statusEl.style.display = 'none';
-      }
-      return true;
-    }
-
-    // Error
-    if (t === 'error') {
-      if (!msgCt) return true;
-
-      var errState = _streams.get(convId);
-      var errReplaced = false;
-      if (errState && errState.loaderEl) {
-        errReplaced = _safeReplace(errState.loaderEl, createErrorBubble(parsed.message));
-      }
-      if (!errReplaced) {
-        _safeAppend(msgCt, createErrorBubble(parsed.message));
-      }
-
-      if (msgEl) {
-        msgEl.classList.remove('streaming-cursor', 'msg-streaming');
-      }
-      _streams.delete(convId);
-      return true;
-    }
-
-    return false;
-  }
-
-  function cleanup(convId) {
-    var state = _streams.get(convId);
-    if (state && state.loaderEl) {
-      var parent = state.loaderEl.parentNode;
-      if (parent) {
-        _safeReplace(state.loaderEl, createErrorBubble('Image generation timed out or failed.'));
-      } else {
-        _safeRemove(state.loaderEl);
-      }
-    }
-    _streams.delete(convId);
-  }
-
-  function getBase64(convId) {
-    var s = _streams.get(convId);
-    return s ? s.rawB64 : null;
-  }
-
-  function downloadById(imgId) {
-    try {
-      var img = document.getElementById(imgId);
-      if (!img || !img.src || img.src === location.href) return;
-      var a = document.createElement('a');
-      a.href = img.src;
-      a.download = 'heloxai-image-' + Date.now() + '.png';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch(e) { console.warn('[ImgStream] download failed:', e); }
-  }
-
-  function fullscreenById(imgId) {
-    try {
-      var img = document.getElementById(imgId);
-      if (!img || !img.src || img.src === location.href) return;
-
-      var modal = document.getElementById('img-modal');
-      if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'img-modal';
-        modal.style.cssText =
-          'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.88);' +
-          'backdrop-filter:blur(14px);display:none;align-items:center;' +
-          'justify-content:center;padding:24px;cursor:zoom-out;opacity:0;transition:opacity .25s ease;';
-        modal.addEventListener('click', function(e) {
-          if (e.target === modal) ImageStreamHandler.closeFullscreen();
-        });
-        document.body.appendChild(modal);
-      }
-
-      // Clear previous content
-      modal.innerHTML = '';
-
-      var mImg = document.createElement('img');
-      mImg.src = img.src;
-      mImg.alt = '';
-      mImg.style.cssText =
-        'max-width:95vw;max-height:92vh;border-radius:12px;' +
-        'box-shadow:0 20px 60px rgba(0,0,0,.5);object-fit:contain;' +
-        'transition:transform .3s cubic-bezier(.4,0,.2,1);';
-      modal.appendChild(mImg);
-      modal.style.display = 'flex';
-      requestAnimationFrame(function() { modal.style.opacity = '1'; });
-
-      var escHandler = function(e) {
-        if (e.key === 'Escape') {
-          ImageStreamHandler.closeFullscreen();
-          document.removeEventListener('keydown', escHandler);
-        }
-      };
-      document.addEventListener('keydown', escHandler);
-    } catch(e) { console.warn('[ImgStream] fullscreen failed:', e); }
-  }
-
-  function closeFullscreen() {
-    var modal = document.getElementById('img-modal');
-    if (modal) {
-      modal.style.opacity = '0';
-      setTimeout(function() { modal.style.display = 'none'; }, 250);
-    }
-  }
-
-  function buildHistoryHTML(b64, prompt) {
-    if (!b64) return '';
-    var uid = 'hi-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    var safeAlt = (prompt || 'Generated image').replace(/[<>&"']/g, '').slice(0, 200);
-    // When loading from history, the img is already inline so no need for deferred src
-    return '<div class="gen-img-card" style="margin:16px 0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-secondary);position:relative">' +
-      '<img id="' + uid + '" src="data:image/png;base64,' + b64 + '" alt="' + safeAlt + '" style="width:100%;display:block;border-radius:var(--radius);cursor:zoom-in;opacity:1" onclick="ImageStreamHandler.fullscreenById(\'' + uid + '\')" />' +
-      '<div style="position:absolute;bottom:10px;right:10px;display:flex;gap:6px;z-index:3">' +
-        '<button onclick="event.stopPropagation();ImageStreamHandler.downloadById(\'' + uid + '\')" style="width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.6);backdrop-filter:blur(8px);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Download"><i class="fa-solid fa-download"></i></button>' +
-        '<button onclick="event.stopPropagation();ImageStreamHandler.fullscreenById(\'' + uid + '\')" style="width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.6);backdrop-filter:blur(8px);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Fullscreen"><i class="fa-solid fa-expand"></i></button>' +
-      '</div>' +
-    '</div>';
-  }
-
-  return {
-    handleEvent: handleEvent,
-    cleanup: cleanup,
-    getBase64: getBase64,
-    downloadById: downloadById,
-    fullscreenById: fullscreenById,
-    closeFullscreen: closeFullscreen,
-    buildHistoryHTML: buildHistoryHTML,
-    createLoader: createLoader
-  };
-})();
-
-
-/* ═══════════════════════════════════════════════════════════════════
-   FIX 3: Safe message element creation — NEVER returns null
-   Call this BEFORE starting the fetch, so msgCt/msgEl always exist.
-   ═══════════════════════════════════════════════════════════════════ */
-function createAIMessageSafe() {
-  var inner = document.querySelector('.msgs-inner');
-  if (!inner) {
-    console.error('[createAIMessage] .msgs-inner not found in DOM');
-    inner = document.querySelector('.msgs-wrap');
-  }
-
-  var msg = document.createElement('div');
-  msg.className = 'msg ai-msg msg-streaming';
-
-  var msgInner = document.createElement('div');
-  msgInner.className = 'msg-inner';
-
-  var label = document.createElement('div');
-  label.className = 'msg-label';
-  label.innerHTML =
-    '<span class="ai-dot"></span>' +
-    '<span>HeloxAi</span>' +
-    '<span class="ai-status">thinking...</span>';
-
-  var ct = document.createElement('div');
-  ct.className = 'msg-ct';
-
-  var acts = document.createElement('div');
-  acts.className = 'msg-acts';
-  acts.style.cssText = 'display:flex;gap:6px;margin-top:10px';
-
-  msgInner.appendChild(label);
-  msgInner.appendChild(ct);
-  msgInner.appendChild(acts);
-  msg.appendChild(msgInner);
-
-  if (inner) {
-    inner.appendChild(msg);
-  }
-
-  return { msgEl: msg, msgCt: ct, msgLabel: label, msgActs: acts };
-}
-
-
-/* ═══════════════════════════════════════════════════════════════════
-   FIX 4: The complete streaming function — drop-in replacement
-   for whatever sendMessage / handleStream you have now.
-   Every null path is guarded. Image events bypass DOMPurify entirely.
-   ═══════════════════════════════════════════════════════════════════ */
-async function streamChat(prompt, convId, opts) {
-  opts = opts || {};
-  var model = opts.model || 'helox';
-  var mode = opts.mode || 'general';
-  var remember = opts.remember !== false;
-  var API_BASE = opts.apiBase || (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
-
-  // ── 1. Create message elements BEFORE any network call ──
-  var ai = createAIMessageSafe();
-  var msgEl = ai.msgEl;
-  var msgCt = ai.msgCt;
-  var msgLabel = ai.msgLabel;
-
-  // Scroll to bottom
-  var wrap = document.querySelector('.msgs-wrap');
-  if (wrap) {
-    requestAnimationFrame(function() {
-      wrap.scrollTop = wrap.scrollHeight;
-    });
-  }
-
-  // ── 2. Track state ──
-  var fullText = '';
-  var isImageGen = false;
-  var streamAborted = false;
-
-  // Stop button
-  var stopBtn = document.createElement('button');
-  stopBtn.className = 'stop-stream-btn';
-  stopBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Stop';
-  stopBtn.addEventListener('click', function() {
-    streamAborted = true;
-    stopBtn.disabled = true;
-    stopBtn.innerHTML = '<i class="fa-solid fa-check"></i> Stopped';
-    msgEl.classList.remove('streaming-cursor', 'msg-streaming');
-  });
-  if (ai.msgActs) ai.msgActs.appendChild(stopBtn);
-
-  // ── 3. Save user message to sidebar display ──
-  // (your existing addMessageToSidebar or equivalent)
-
-  try {
-    var resp = await fetch(API_BASE + '/ask/universal', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream'
-      },
-      credentials: 'include',
-      body: JSON.stringify({
-        prompt: prompt,
-        conversation_id: convId || null,
-        stream: true,
-        remember: remember,
-        model: model,
-        mode: mode
-      })
-    });
-
-    if (!resp.ok) {
-      var errText = '';
-      try { errText = await resp.text(); } catch(e) {}
-      throw new Error('HTTP ' + resp.status + (errText ? ': ' + errText.slice(0, 200) : ''));
-    }
-
-        var reader = resp.body.getReader();
-    var decoder = new TextDecoder();
-    var buffer = '';
-    var effectiveConvId = convId;
-
-    while (true) {
-      if (streamAborted) break;
-      var result = await reader.read();
-      if (result.done) break;
-
-      buffer += decoder.decode(result.value, { stream: true });
-      var lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (var i = 0; i < lines.length; i++) {
-        if (streamAborted) break;
-        var line = lines[i].replace(/\r$/, '');
-        if (!line) continue;
-        if (!line.startsWith('data: ')) continue;
-        var raw = line.slice(6).trim();
-        if (raw === '[DONE]') continue;
-
-// Test 2: Image card creation
-try {
-  var c = document.createElement('div');
-  document.body.appendChild(c);
-  var handled = ImageStreamHandler.handleEvent(
-    {type:'image', data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=='},
-    c, null, 'test-conv', 'test prompt'
-  );
-  console.log('Image event handled:', handled);
-  var img = c.querySelector('img');
-  console.log('Img created:', !!img, 'Has src:', !!img && img.src.length > 50);
-  document.body.removeChild(c);
-} catch(e) { console.log('Card error:', e.message); }
-
-// Test 3: Buffer flush exists?
-var scripts = document.querySelectorAll('script');
-var found = false;
-for (var i = 0; i < scripts.length; i++) {
-  if (scripts[i].textContent.includes('_fb') && scripts[i].textContent.includes('startsWith')) {
-    found = true;
-    console.log('Buffer flush FOUND in script #' + i);
-    break;
-  }
-}
-if (!found) console.log('❌ Buffer flush MISSING — image will never display');
-
-        var parsed;
-        try { parsed = JSON.parse(raw); } catch(e) { continue; }
-
-        if (parsed.conversation_id && !effectiveConvId) {
-          effectiveConvId = parsed.conversation_id;
-        }
-
-        // Image events — bypass DOMPurify/marked
-        if (ImageStreamHandler.handleEvent(parsed, msgCt, msgEl, effectiveConvId || '__none__', prompt)) {
-          isImageGen = true;
-          if (stopBtn && stopBtn.parentNode) stopBtn.remove();
-          continue;
-        }
-
-        // Text content
-        if (parsed.type === 'content' && typeof parsed.text === 'string') {
-          fullText += parsed.text;
-          try {
-            var rawHtml = typeof marked !== 'undefined'
-              ? marked.parse(fullText, { breaks: true, gfm: true })
-              : fullText.replace(/</g, '&lt;').replace(/\n/g, '<br>');
-            var cleanHtml = typeof DOMPurify !== 'undefined'
-              ? DOMPurify.sanitize(rawHtml, {
-                  ALLOWED_TAGS: DOMPurify.getDefaultConfig().ALLOWED_TAGS,
-                  ALLOWED_ATTR: ['src','alt','id','class','style','href','target','rel','data-keep-src','onclick','loading'],
-                  ADD_TAGS: ['img','details','summary','input'],
-                  ADD_ATTR: ['type','checked','disabled','open']
-                })
-              : rawHtml;
-            msgCt.innerHTML = cleanHtml;
-          } catch(e) { msgCt.textContent = fullText; }
-
-          msgEl.classList.add('streaming-cursor');
-          if (wrap) requestAnimationFrame(function() { wrap.scrollTop = wrap.scrollHeight; });
-          continue;
-        }
-
-        if (parsed.type === 'done') {
-          msgEl.classList.remove('streaming-cursor', 'msg-streaming');
-          if (msgLabel) { var st = msgLabel.querySelector('.ai-status'); if (st) st.style.display = 'none'; }
-          continue;
-        }
-
-        if (parsed.type === 'error') {
-          msgEl.classList.remove('streaming-cursor', 'msg-streaming');
-          if (!isImageGen) {
-            msgCt.innerHTML = '<div style="color:var(--danger);padding:8px 0"><i class="fa-solid fa-circle-exclamation"></i> ' +
-              ((parsed.message || 'Error') + '').replace(/[<>&"']/g, '') + '</div>';
-          }
-          continue;
-        }
-      }
-    }
-
-    /* FLUSH: image base64 (~1.2MB) arrives as one SSE line that spans
-       hundreds of TCP chunks. The \n only appears at the very end,
-       so it stays in buffer until the stream closes. Without this
-       flush, the image event is never processed. */
-    var _fb = buffer.replace(/\r$/, '');
-    if (_fb && _fb.startsWith('data: ')) {
-      var _fp = _fb.slice(6).trim();
-      if (_fp !== '[DONE]') {
-        try {
-          var _fj = JSON.parse(_fp);
-          if (_fj.conversation_id && !effectiveConvId) effectiveConvId = _fj.conversation_id;
-          if (ImageStreamHandler.handleEvent(_fj, msgCt, msgEl, effectiveConvId || '__none__', prompt)) {
-            isImageGen = true;
-            if (stopBtn && stopBtn.parentNode) stopBtn.remove();
-          }
-        } catch(_e) {}
-      }
-      buffer = '';
-    }
-        // ╔═══════════════════════════════════════════════╗
-        // ║  IMAGE EVENTS — handled by ImageStreamHandler ║
-        // ║  These NEVER touch DOMPurify or marked         ║
-        // ╚═══════════════════════════════════════════════╝
-        if (ImageStreamHandler.handleEvent(
-          parsed, msgCt, msgEl, effectiveConvId || '__none__', prompt
-        )) {
-          isImageGen = true;
-          // Remove stop button once image starts generating
-          // (can't cancel an in-flight OpenAI image gen)
-          if (stopBtn.parentNode) stopBtn.remove();
-          continue;
-        }
-
-        // ── Text content delta ──
-        if (parsed.type === 'content' && typeof parsed.text === 'string') {
-          fullText += parsed.text;
-          // Render through markdown pipeline
-          try {
-            var rawHtml = typeof marked !== 'undefined'
-              ? marked.parse(fullText, { breaks: true, gfm: true })
-              : fullText.replace(/</g, '&lt;').replace(/\n/g, '<br>');
-
-            // Sanitize — but our hook preserves data:image URIs
-            var cleanHtml = typeof DOMPurify !== 'undefined'
-              ? DOMPurify.sanitize(rawHtml, {
-                  ALLOWED_TAGS: DOMPurify.getDefaultConfig().ALLOWED_TAGS,
-                  ALLOWED_ATTR: ['src', 'alt', 'id', 'class', 'style', 'href', 'target', 'rel',
-                    'data-preserve-src', 'onclick', 'loading'],
-                  ADD_TAGS: ['img', 'details', 'summary', 'input'],
-                  ADD_ATTR: ['type', 'checked', 'disabled', 'open']
-                })
-              : rawHtml;
-
-            msgCt.innerHTML = cleanHtml;
-          } catch(renderErr) {
-            // Fallback: plain text if markdown/sanitize fails
-            msgCt.textContent = fullText;
-          }
-
-          msgEl.classList.add('streaming-cursor');
-          if (msgLabel) {
-            var statusSpan = msgLabel.querySelector('.ai-status');
-            if (statusSpan) statusSpan.textContent = 'responding...';
-          }
-
-          // Auto-scroll
-          if (wrap) {
-            requestAnimationFrame(function() {
-              wrap.scrollTop = wrap.scrollHeight;
-            });
-          }
-          continue;
-        }
-
-        // ── Done signal ──
-        if (parsed.type === 'done') {
-          msgEl.classList.remove('streaming-cursor', 'msg-streaming');
-          if (msgLabel) {
-            var st = msgLabel.querySelector('.ai-status');
-            if (st) st.style.display = 'none';
-          }
-          continue;
-        }
-
-        // ── Non-image error (text errors only reach here) ──
-        if (parsed.type === 'error') {
-          msgEl.classList.remove('streaming-cursor', 'msg-streaming');
-          if (!isImageGen) {
-            msgCt.innerHTML = '<div style="color:var(--danger);padding:8px 0">' +
-              '<i class="fa-solid fa-circle-exclamation"></i> ' +
-              ((parsed.message || 'An error occurred') + '').replace(/[<>&"']/g, '') +
-              '</div>';
-          }
-          continue;
-        }
-      }
-    }
-
-    // ── Post-stream cleanup ──
-    ImageStreamHandler.cleanup(effectiveConvId || '__none__');
-    msgEl.classList.remove('streaming-cursor', 'msg-streaming');
-    if (stopBtn.parentNode) stopBtn.remove();
-
-    // Final render pass for KaTeX, highlight.js, etc.
-    if (fullText && !isImageGen) {
-      try {
-        // Re-render markdown one final time (clean)
-        var finalHtml = typeof marked !== 'undefined'
-          ? marked.parse(fullText, { breaks: true, gfm: true })
-          : fullText.replace(/</g, '&lt;').replace(/\n/g, '<br>');
-        finalHtml = typeof DOMPurify !== 'undefined'
-          ? DOMPurify.sanitize(finalHtml, {
-              ALLOWED_TAGS: DOMPurify.getDefaultConfig().ALLOWED_TAGS,
-              ALLOWED_ATTR: ['src','alt','id','class','style','href','target','rel','data-preserve-src','onclick','loading'],
-              ADD_TAGS: ['img','details','summary','input'],
-              ADD_ATTR: ['type','checked','disabled','open']
-            })
-          : finalHtml;
-        msgCt.innerHTML = finalHtml;
-      } catch(e) {}
-
-      // Run post-render hooks
-      if (typeof renderMathInElement === 'function') {
-        try { renderMathInElement(msgCt, {
-          delimiters: [
-            {left: '$$', right: '$$', display: true},
-            {left: '$', right: '$', display: false}
-          ],
-          throwOnError: false
-        }); } catch(e) {}
-      }
-      msgCt.querySelectorAll('pre code').forEach(function(block) {
-        if (typeof hljs !== 'undefined') {
-          try { hljs.highlightElement(block); } catch(e) {}
-        }
-      });
-    }
-
-    // ── Build final content for history saving ──
-    var finalContent = fullText;
-    if (isImageGen) {
-      var imgB64 = ImageStreamHandler.getBase64(effectiveConvId || '__none__');
-      if (imgB64) {
-        finalContent = ImageStreamHandler.buildHistoryHTML(imgB64, prompt);
-        // Also put it in the DOM if not already there
-        if (!msgCt.querySelector('.gen-img-card')) {
-          msgCt.innerHTML = finalContent;
-        }
-      }
-    }
-
-    // ── Save messages to backend/history ──
-    if (effectiveConvId && finalContent) {
-      try {
-        await fetch(API_BASE + '/chat/' + effectiveConvId + '/messages', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            role: 'assistant',
-            content: finalContent
-          })
-        });
-      } catch(e) {
-        console.warn('[streamChat] Failed to save message:', e);
-      }
-    }
-
-    // Update sidebar conversation list if needed
-    if (effectiveConvId && typeof updateSidebar === 'function') {
-      try { updateSidebar(); } catch(e) {}
-    }
-
-    return { conversation_id: effectiveConvId, content: finalContent };
-
-  } catch(err) {
-    // ── Fatal error (network, parse, etc.) ──
-    console.error('[streamChat] Fatal error:', err);
-    ImageStreamHandler.cleanup(convId || '__none__');
-    msgEl.classList.remove('streaming-cursor', 'msg-streaming');
-    if (stopBtn.parentNode) stopBtn.remove();
-
-    if (!isImageGen && !fullText) {
-      msgCt.innerHTML =
-        '<div style="color:var(--danger);padding:12px 0;display:flex;align-items:center;gap:10px">' +
-          '<i class="fa-solid fa-circle-exclamation" style="flex-shrink:0"></i>' +
-          '<div>' +
-            '<div style="font-weight:600;margin-bottom:4px">Connection Error</div>' +
-            '<div style="font-size:13px;color:var(--text-secondary)">' +
-              (err.message || 'Unknown error').replace(/[<>&"']/g, '') +
+/* ════════════════════════════════════════════════════════════
+   IMAGE STREAMING — CHATGPT-STYLE PROGRESSIVE REVEAL
+   ════════════════════════════════════════════════════════════ */
+
+var _imageStreamActive = false;
+
+function showImageStreamLoader(msgIndex) {
+    var imgContainer = $('mi-' + msgIndex);
+    if (!imgContainer) return;
+
+    // Remove any existing skeleton/loader
+    var existing = imgContainer.querySelector('.img-stream-container, .gen-img-skeleton, .img-gen-loader');
+    if (existing) existing.remove();
+
+    var container = document.createElement('div');
+    container.className = 'img-stream-container';
+    container.id = 'imgStreamActive';
+    container.innerHTML =
+        '<div class="img-stream-viewport">' +
+            '<div class="img-stream-shimmer"></div>' +
+            '<img class="img-stream-preview" alt="" style="opacity:0" />' +
+            '<div class="img-stream-progress-track">' +
+                '<div class="img-stream-progress-fill" style="width:0%"></div>' +
             '</div>' +
-          '</div>' +
+            '<div class="img-stream-label">' +
+                '<i class="fa-solid fa-wand-magic-sparkles"></i>' +
+                '<span>Generating image...</span>' +
+            '</div>' +
         '</div>';
-    }
 
-    return { conversation_id: convId, content: fullText, error: err.message };
-  }
+    imgContainer.appendChild(container);
+    _imageStreamActive = true;
+    scrollBot(true);
 }
 
-/* ═══════════════════════════════════════════════════════════════════
-   FIX 5: When loading history, make saved images interactive
-   ═══════════════════════════════════════════════════════════════════ */
-function initHistoricalImages(container) {
-  if (!container) return;
-  var imgs = container.querySelectorAll('.gen-img-card img');
-  for (var i = 0; i < imgs.length; i++) {
-    if (!imgs[i].classList.contains('loaded')) {
-      imgs[i].style.opacity = '1';
-      imgs[i].classList.add('loaded');
+function updateImageStreamProgress(ev) {
+    var container = $('imgStreamActive');
+    if (!container) return;
+
+    var progress = Math.min(100, Math.max(0, ev.progress || 0));
+    if (!ev.data) return;
+
+    // Update progress bar
+    var fill = container.querySelector('.img-stream-progress-fill');
+    if (fill) fill.style.width = progress + '%';
+
+    var preview = container.querySelector('.img-stream-preview');
+    if (!preview) return;
+
+    // Hide shimmer once we have first frame
+    var shimmer = container.querySelector('.img-stream-shimmer');
+    if (shimmer && !shimmer.classList.contains('hidden')) {
+        shimmer.classList.add('hidden');
     }
-  }
+
+    // Set the progressive JPEG frame
+    preview.src = 'data:image/jpeg;base64,' + ev.data;
+    preview.style.opacity = '1';
+
+    // ChatGPT-style blur curve: stays blurry 0-70%, snaps sharp 70-100%
+    var t = progress / 100;
+    var blur;
+    if (t < 0.7) {
+        blur = 30 - (t / 0.7) * 24;   // 30px → 6px
+    } else {
+        var t2 = (t - 0.7) / 0.3;
+        blur = 6 * (1 - t2 * t2);      // 6px → 0px (quadratic ease)
+    }
+    blur = Math.max(0, blur);
+    var brightness = 1 + (blur / 80);
+    var scale = 1 + (blur / 600);
+
+    preview.style.filter = 'blur(' + blur.toFixed(1) + 'px) brightness(' + brightness.toFixed(3) + ')';
+    preview.style.transform = 'scale(' + scale.toFixed(4) + ')';
+
+    // Update status label text
+    var labelSpan = container.querySelector('.img-stream-label span');
+    if (labelSpan) {
+        if (progress < 15) labelSpan.textContent = 'Generating image...';
+        else if (progress < 35) labelSpan.textContent = 'Outlining shapes...';
+        else if (progress < 55) labelSpan.textContent = 'Adding details...';
+        else if (progress < 75) labelSpan.textContent = 'Refining textures...';
+        else if (progress < 90) labelSpan.textContent = 'Enhancing quality...';
+        else labelSpan.textContent = 'Finalizing...';
+    }
+
+    // Fade out label near completion
+    var labelEl = container.querySelector('.img-stream-label');
+    if (labelEl) {
+        if (progress >= 85) labelEl.classList.add('fade-out');
+        else labelEl.classList.remove('fade-out');
+    }
+
+    scrollBot(true);
 }
 
-/* ═══════════════════════════════════════════════════════════════════
-   FIX 6: Complete the missing CSS that was cut off in your file
-   Append this to your <style> block (replaces everything from
-   .img-gen-loader-bg onward that was truncated)
-   ═══════════════════════════════════════════════════════════════════ */
+function finalizeImageStream(ev) {
+    var container = $('imgStreamActive');
+    if (!container) return;
+
+    var imageData = ev.data;
+    if (!imageData) return;
+
+    // Detect format from base64 header
+    var isPng = !imageData.startsWith('/9j/');
+    var mime = isPng ? 'data:image/png;base64,' : 'data:image/jpeg;base64,';
+    var fullSrc = mime + imageData;
+
+    // Build final image card with proper event listeners
+    var card = document.createElement('div');
+    card.className = 'gen-img-card';
+
+    var wrap = document.createElement('div');
+    wrap.className = 'gen-img-wrap';
+
+    var img = document.createElement('img');
+    img.className = 'gen-img-final';
+    img.alt = 'Generated image';
+    img.loading = 'eager';
+    img.src = fullSrc;
+
+    var overlay = document.createElement('div');
+    overlay.className = 'gen-img-hover-overlay';
+
+    var dlBtn = document.createElement('button');
+    dlBtn.className = 'gen-img-action';
+    dlBtn.innerHTML = '<i class="fa-solid fa-download"></i> Download';
+
+    var expandBtn = document.createElement('button');
+    expandBtn.className = 'gen-img-action';
+    expandBtn.innerHTML = '<i class="fa-solid fa-expand"></i> Expand';
+
+    overlay.appendChild(dlBtn);
+    overlay.appendChild(expandBtn);
+    wrap.appendChild(img);
+    wrap.appendChild(overlay);
+    card.appendChild(wrap);
+
+    // Wire up clicks
+    wrap.addEventListener('click', function(e) {
+        if (e.target.closest('.gen-img-action')) return;
+        openLB(fullSrc, false);
+    });
+    dlBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        downloadResource(fullSrc);
+    });
+    expandBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        openLB(fullSrc, false);
+    });
+
+    // Smooth transition from streaming → final
+    container.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+    container.style.opacity = '0';
+    container.style.transform = 'scale(0.98)';
+
+    setTimeout(function() {
+        if (container.parentNode) {
+            container.parentNode.replaceChild(card, container);
+        }
+        // Reveal the final image
+        if (img.complete && img.naturalWidth > 0) {
+            img.classList.add('loaded');
+        } else {
+            img.onload = function() { img.classList.add('loaded'); };
+            setTimeout(function() { img.classList.add('loaded'); }, 800);
+        }
+        _imageStreamActive = false;
+        scrollBot(true);
+    }, 260);
+
+    // Store in message data for gallery/history
+    var idx = S.msgs.length - 1;
+    if (S.msgs[idx]) {
+        if (!S.msgs[idx].images) S.msgs[idx].images = [];
+        S.msgs[idx].images.push({ url: fullSrc, name: 'Generated', type: 'image' });
+        if (!S.gallery.some(function(g) { return g.url === fullSrc; })) {
+            S.gallery.unshift({ type: 'image', url: fullSrc, prompt: 'Generated', id: uid() });
+        }
+        incrementUsage('images');
+    }
+}
+
+function showImageStreamError(ev) {
+    var container = $('imgStreamActive');
+    if (!container) return;
+
+    var el = document.createElement('div');
+    el.className = 'img-stream-error';
+    el.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>' +
+                    '<span>Image generation failed: ' + esc(ev.error || 'Unknown error') + '</span>';
+
+    container.style.transition = 'opacity 0.2s ease';
+    container.style.opacity = '0';
+    setTimeout(function() {
+        if (container.parentNode) {
+            container.parentNode.replaceChild(el, container);
+        }
+        _imageStreamActive = false;
+    }, 210);
+}
+
+// Main router for image SSE events
+function handleImageEvent(ev) {
+    var msgIndex = S.msgs.length - 1;
+    if (msgIndex < 0) return;
+
+    switch (ev.type) {
+        case 'image_generating':
+            showImageStreamLoader(msgIndex);
+            break;
+        case 'image_progress':
+            updateImageStreamProgress(ev);
+            break;
+        case 'image_generated':
+            finalizeImageStream(ev);
+            break;
+        case 'image_error':
+            showImageStreamError(ev);
+            break;
+    }
+}
 
 function sendToAI(text){
   if(!text)return;S.streaming=true;S.abort=new AbortController();addTyping();updateCB();var full='';
@@ -5958,21 +5474,30 @@ function sendToAI(text){
   var onMedia = function(data){
       var idx = S.msgs.length - 1;
       if(!S.msgs[idx]) return;
+      if(data.type === 'search_results' && data.html){
+          // Prepend search results to the message content
+          var el = $('mc-' + idx);
+          if(el) {
+              var searchDiv = document.createElement('div');
+              searchDiv.innerHTML = data.html;
+              el.insertBefore(searchDiv, el.firstChild);
+          }
+          return;
+      }
       if(!S.msgs[idx].images) S.msgs[idx].images = [];
       var mediaType = 'image'; 
       if (data.media_type === 'video' || (data.url && (data.url.includes('.mp4') || data.url.includes('.webm')))) mediaType = 'video';
       if(data.type === 'image'){
           data.data.forEach(function(img){
-              var url = img.url || img;
-              S.msgs[idx].images.push({url: url, name: 'Generated', type: mediaType});
-              if(!S.gallery.some(function(g){return g.url===url})) S.gallery.unshift({type:mediaType,url:url,prompt:'Generated',id:uid()});
+              var img_url = img.url || img;
+              S.msgs[idx].images.push({url: img_url, name: 'Generated', type: mediaType});
+              if(!S.gallery.some(function(g){return g.url===img_url})) S.gallery.unshift({type:mediaType,url:img_url,prompt:'Generated',id:uid()});
               incrementUsage('images');
               var el=$('mi-'+idx);
-              if(el) { el.insertAdjacentHTML('beforeend', '<div class="msg-img-item single"><img src="'+url+'" loading="lazy"></div>'); }
+              if(el) { el.insertAdjacentHTML('beforeend', '<div class="msg-img-item single"><img src="'+img_url+'" loading="lazy"></div>'); }
           });
       } else if (data.type === 'video') {
-          var vidObj = {type:mediaType, url:data.url};
-          S.msgs[idx].images.push(vidObj);
+          S.msgs[idx].images.push({type:mediaType, url:data.url});
           if(!S.gallery.some(function(g){return g.url===data.url})) S.gallery.unshift({type:mediaType,url:data.url,prompt:'Generated',id:uid()});
           incrementUsage('videos');
           var el=$('mi-'+idx);
@@ -5980,6 +5505,7 @@ function sendToAI(text){
       }
       renderAll(); scrollBot(true);
   };
+  
   var onStatus = function(msg){
       var typing = document.getElementById('ai-status-typing');
       if(typing) typing.textContent = msg;
@@ -5990,20 +5516,40 @@ function sendToAI(text){
 
   fetch(url+'/ask/universal',{
       method:'POST', headers:authH(), credentials:'include', signal:S.abort.signal,
-      body:JSON.stringify({ prompt:text, conversation_id:S.chatId, model: S.model })
+      body:JSON.stringify({ prompt:text, conversation_id:S.chatId, model: S.model, mode: S.mode })
   }).then(function(res){
     if(!res.ok)throw new Error('HTTP '+res.status);rmTyping();
     var ct=(res.headers.get('content-type')||'').toLowerCase();
     if(ct.indexOf('application/json')!==-1){
-      return res.json().then(function(d){var c=d.response||d.content||d.result||d.message||JSON.stringify(d);var ai={id:uid(),role:'assistant',content:c,liked:false,disliked:false,time:now()};S.msgs.push(ai);renderAll();addGal(c);saveChatHistory(S.chatId, S.msgs);if(S.chatId)updateTs(S.chatId);});
+      return res.json().then(function(d){
+          var c=d.response||d.content||d.result||d.message||JSON.stringify(d);
+          var ai={id:uid(),role:'assistant',content:c,liked:false,disliked:false,time:now()};
+          S.msgs.push(ai);renderAll();addGal(c);
+          saveChatHistory(S.chatId, S.msgs);
+          if(S.chatId)updateTs(S.chatId);
+      });
     }
-    var ai={id:uid(),role:'assistant',content:'',liked:false,disliked:false,time:now()};S.msgs.push(ai);renderAll();
-    return streamRes(res,function(chunk){full+=chunk;updateLastAI(full);},function(){
-        S.msgs[S.msgs.length-1].content=full;
-        saveChatHistory(S.chatId, S.msgs);if(S.chatId)updateTs(S.chatId);
-        // Trigger Mermaid rendering after streaming is complete for this message
-        var i=S.msgs.length-1; var el=$('mc-'+i); if(el) processMermaid(el);
-    }, onMedia, onStatus);
+    var ai={id:uid(),role:'assistant',content:'',liked:false,disliked:false,time:now()};
+    S.msgs.push(ai);renderAll();
+    
+    return streamRes(
+      res,
+      function(chunk) {                    // onChunk (text)
+          full += chunk;
+          updateLastAI(full);
+      },
+      function() {                          // onDone
+          S.msgs[S.msgs.length-1].content = full;
+          saveChatHistory(S.chatId, S.msgs);
+          if(S.chatId) updateTs(S.chatId);
+          var i = S.msgs.length-1;
+          var el = $('mc-'+i);
+          if(el) processMermaid(el);
+      },
+      onMedia,                              // onMedia (legacy media + search_results)
+      onStatus,                             // onStatus
+      handleImageEvent                      // onImageEvent (NEW — progressive image streaming)
+    );
   }).catch(function(e){
     rmTyping();
     if(e.name==='AbortError'){
@@ -6022,7 +5568,9 @@ function sendToAI(text){
         renderAll();
         handleError(e, 'AI Generation');
     }
-  }).finally(function(){S.streaming=false;S.abort=null;updateCB();});
+  }).finally(function(){
+      S.streaming=false;S.abort=null;updateCB();
+  });
 }
 
 function regenAI(){
@@ -6360,5 +5908,12 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 
 })();
 </script>
+<!-- Fullscreen Image Modal -->
+<div id="img-modal" onclick="closeImgModal()">
+  <button class="img-modal-close" onclick="closeImgModal()" aria-label="Close image">
+    <i class="fa-solid fa-xmark"></i>
+  </button>
+  <img id="modalImg" class="img-modal-img" alt="Full size image" onclick="event.stopPropagation()" />
+</div>
 </body>
 </html>
